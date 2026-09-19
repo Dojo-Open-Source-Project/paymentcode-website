@@ -21,6 +21,7 @@
     <meta name="twitter:description" content="Technical reference for BIP47 payment codes, PayNyms, Auth47 authentication, and the BIP47 Terminal API.">
     <meta name="twitter:image" content="https://paymentcode.io/logos/favicons/android-chrome-512x512.png">
 
+    <link rel="canonical" href="https://paymentcode.io/docs">
     <title>Docs — BIP47 & PayNyms</title>
     <link rel="icon" type="image/x-icon" href="/logos/favicons/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="/logos/favicons/favicon-32x32.png">
@@ -362,13 +363,14 @@
     </style>
 </head>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <div class="container">
         <div class="nav-bar">
             <a href="/" class="back-link">← Back to Home</a>
             <span style="color: var(--text-muted); font-size: 0.8rem;">[DOCUMENTATION]</span>
         </div>
 
-        <div class="main-content">
+        <main class="main-content" id="main">
             <div class="header">
                 <h1>> DOCUMENTATION</h1>
                 <div class="subtitle">BIP47 protocol, Auth47 specification, and API references</div>
@@ -452,7 +454,7 @@
                     <div class="code-header">
                         <span class="lang">Example</span>
                     </div>
-                    <pre><code>PM8TJYp8zHvhimVNRjUcEuULfmvmUML6YTbTSnU69MYy93AzsXELFLaVjpxc5mxDex7R8ttgtL1tGAt2TshZAoFeB5zn4c9nRo4oZpmuyuo4FTpUrd</code></pre>
+                    <pre><code>PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW</code></pre>
                 </div>
 
                 <h3>Notification Address</h3>
@@ -904,7 +906,7 @@ const account = root.derivePath("m/47'/0'/0'");
 
 const paymentCode = bip47.fromBip32Node(account);
 console.log(paymentCode.toBase58());
-// PM8TJYp8zHvhimVNRjUcEuULfmvmUML6YTbTSnU69MYy93AzsXELFLaVjpxc5mxDex7R8ttgtL1tGAt2TshZAoFeB5zn4c9nRo4oZpmuyuo4FTpUrd</code></pre>
+// PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW</code></pre>
                 </div>
 
                 <h3>Derive Payment Address</h3>
@@ -970,11 +972,15 @@ console.log(data.codes[0].code);  // Payment code</code></pre>
                     <div class="code-header">
                         <span class="lang">URL Pattern</span>
                     </div>
-                    <pre><code>// Avatar URL format
-https://paynym.rs/{payment_code}/avatar
+                    <pre><code>// Preferred: our proxy. Served from this origin and cached,
+// so a visitor's browser never contacts a third party.
+GET /api/paynym/avatar/{payment_code}
 
 // Example
-https://paynym.rs/PM8TJYp8zHvhimVNRjUcEuULfmvmUML6YTbTSnU69MYy93AzsXELFLaVjpxc5mxDex7R8ttgtL1tGAt2TshZAoFeB5zn4c9nRo4oZpmuyuo4FTpUrd/avatar</code></pre>
+/api/paynym/avatar/PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW
+
+// Upstream origin (contacted by our server, not by the browser)
+https://paynym.rs/{payment_code}/avatar</code></pre>
                 </div>
 
                 <h3>Verify BIP47 Message</h3>
@@ -1066,7 +1072,7 @@ console.log(isValid ? '✅ Signature verified!' : '❌ Invalid signature');</cod
   "valid": true,
   "notificationAddress": "1A1zP1eP5QGefi2DMPTfTL5SLmv7DivfNa",
   "nymName": "example",
-  "avatarUrl": "https://paynym.rs/PM8T.../avatar"
+  "avatarUrl": "/api/paynym/avatar/PM8T..."
 }</code></pre>
                         </div>
                     </div>
@@ -1178,7 +1184,7 @@ console.log(isValid ? '✅ Signature verified!' : '❌ Invalid signature');</cod
             </section>
                 </main>
             </div>
-        </div>
+        </main>
     </div>
     
     <div class="footer">

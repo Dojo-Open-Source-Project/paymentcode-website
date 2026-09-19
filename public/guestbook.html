@@ -21,6 +21,7 @@
   <meta name="twitter:description" content="Leave a signed message for the cypherpunk community. Authenticated with Bitcoin.">
   <meta name="twitter:image" content="https://paymentcode.io/logos/favicons/android-chrome-512x512.png">
 
+  <link rel="canonical" href="https://paymentcode.io/guestbook">
   <title>Guestbook — BIP47 & PayNyms</title>
   <link rel="icon" type="image/x-icon" href="/logos/favicons/favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="/logos/favicons/favicon-32x32.png">
@@ -356,13 +357,14 @@
         }
     </style>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
     <div class="container">
         <div class="nav-bar">
             <a href="/" class="back-link">← Back to Home</a>
             <span style="color: var(--text-muted); font-size: 0.8rem;">[GUESTBOOK]</span>
         </div>
 
-        <div class="main-content">
+        <main class="main-content" id="main">
             <h1>> GUESTBOOK</h1>
                 <div class="subtitle">Cryptographically verified messages from the BIP47 community</div>
 
@@ -374,13 +376,12 @@
 
                 <div id="messages-container" class="messages-list" style="margin-bottom: var(--space-xl);">
                     <div class="empty-state">
-                        <div class="empty-state-icon">📝</div>
+                        <div class="empty-state-icon" aria-hidden="true">📝</div>
                         <div>Loading messages...</div>
                     </div>
                 </div>
-            </div>
+            </main>
         </div>
-    </div>
     
     <div class="footer">
         <div class="footer-text">Built with <span class="footer-heart">♥</span> for the cypherpunk community</div>
@@ -453,14 +454,22 @@
             try {
                 console.log('🔍 Loading messages...');
                 const response = await fetch('/api/guestbook/messages');
-                const messages = await response.json();
+                const payload = await response.json();
 
+                // The endpoint returns { error } rather than an array when the
+                // database is down. Calling .map() on that threw an opaque
+                // "messages.map is not a function" instead of explaining why.
+                if (!response.ok || !Array.isArray(payload)) {
+                    throw new Error(payload?.error || `Request failed (${response.status})`);
+                }
+
+                const messages = payload;
                 const container = document.getElementById('messages-container');
 
                 if (messages.length === 0) {
                     container.innerHTML = `
                         <div class="empty-state">
-                            <div class="empty-state-icon">📝</div>
+                            <div class="empty-state-icon" aria-hidden="true">📝</div>
                             <div>No messages yet. Be the first to sign!</div>
                         </div>
                     `;
@@ -471,7 +480,7 @@
                     <div class="message-card">
                         <div class="message-header">
                             ${msg.nymAvatar 
-                                ? `<img src="${msg.nymAvatar}" class="avatar" alt="${msg.nymName}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
+                                ? `<img src="${escapeHtml(msg.nymAvatar)}" class="avatar" alt="${escapeHtml(msg.nymName)}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
                                    <div class="avatar-placeholder" style="display: none;">?</div>`
                                 : `<div class="avatar-placeholder">?</div>`
                             }
@@ -489,8 +498,9 @@
                 console.error('💥 Error loading messages:', error);
                 document.getElementById('messages-container').innerHTML = `
                     <div class="empty-state">
-                        <div class="empty-state-icon">❌</div>
+                        <div class="empty-state-icon" aria-hidden="true">❌</div>
                         <div>Failed to load messages. Please try again.</div>
+                        <div class="text-muted mt-sm">${escapeHtml(error.message)}</div>
                     </div>
                 `;
             }
@@ -650,10 +660,16 @@
         }
 
         // Escape HTML to prevent XSS
+        // Escapes for both text and attribute contexts. The previous DOM-based
+        // version left quotes untouched, which is safe between tags but not
+        // inside alt="..." or src="...".
         function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
+            return String(text ?? '')
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#39;');
         }
 
         // Format date

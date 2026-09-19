@@ -21,6 +21,7 @@
     <meta name="twitter:description" content="Explore and experiment with BIP47 payment codes. Derive addresses, inspect notification transactions, and more.">
     <meta name="twitter:image" content="https://paymentcode.io/logos/favicons/android-chrome-512x512.png">
 
+    <link rel="canonical" href="https://paymentcode.io/lab">
     <title>The Lab — BIP47 & PayNyms</title>
     <link rel="icon" type="image/x-icon" href="/logos/favicons/favicon.ico">
     <link rel="icon" type="image/png" sizes="32x32" href="/logos/favicons/favicon-32x32.png">
@@ -621,13 +622,14 @@
         }
     </style>
 <body>
+    <a class="skip-link" href="#main">Skip to content</a>
     <div class="container">
         <div class="nav-bar">
             <a href="/" class="back-link">← Back to Home</a>
             <span style="color: var(--text-muted); font-size: 0.8rem;">[BIP47 LAB]</span>
         </div>
 
-        <div class="main-content">
+        <main class="main-content" id="main">
             <h1>> BIP47 LAB</h1>
                 <div class="subtitle">Payment code validation and interactive BIP47 payment flow demonstration</div>
 
@@ -660,7 +662,7 @@
                                 <div class="input-group" style="margin-top: 1rem;">
                                     <label>Bob's Payment Code (from donation page)</label>
                                     <input type="text" id="scenario-bob-pc"
-                                           value="PM8TJYp8zHvhimVNRjUcEuULfmvmUML6YTbTSnU69MYy93AzsXELFLaVjpxc5mxDex7R8ttgtL1tGAt2TshZAoFeB5zn4c9nRo4oZpmuyuo4FTpUrd"
+                                           value="PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW"
                                            readonly style="font-size: 0.75rem;">
                                 </div>
                                 <button onclick="nextStep(2)">Initialize Payment Channel →</button>
@@ -882,8 +884,8 @@ Base64SignatureHere...
                     <div class="input-group">
                         <label>Payment Code to Validate</label>
                         <input type="text" id="validate-input" 
-                               placeholder="PM8TJYp8zHvhimVNRjUcEuULfmvmUML6YTbTSnU69MYy93AzsXELFLaVjpxc5mxDex7R8ttgtL1tGAt2TshZAoFeB5zn4c9nRo4oZpmuyuo4FTpUrd"
-                               value="PM8TJYp8zHvhimVNRjUcEuULfmvmUML6YTbTSnU69MYy93AzsXELFLaVjpxc5mxDex7R8ttgtL1tGAt2TshZAoFeB5zn4c9nRo4oZpmuyuo4FTpUrd">
+                               placeholder="PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW"
+                               value="PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW">
                     </div>
                     
                     <button id="validate-btn" onclick="validatePaymentCode()">
@@ -933,9 +935,8 @@ Base64SignatureHere...
                     </div>
                 </div>
 
-            </div>
+            </main>
         </div>
-    </div>
     
     <div class="footer">
         <div class="footer-text">Built with <span class="footer-heart">♥</span> for the cypherpunk community</div>
@@ -1451,7 +1452,7 @@ Base64SignatureHere...
                     return {
                         paymentCode: primaryCode,
                         nymName: data.nymName || nymId,
-                        avatarUrl: `https://paynym.rs/${primaryCode}/avatar`
+                        avatarUrl: `/api/paynym/avatar/${primaryCode}`
                     };
                 }
                 throw new Error('Payment code not found in response');

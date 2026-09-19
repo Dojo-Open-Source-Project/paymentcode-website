@@ -21,6 +21,7 @@
   <meta name="twitter:description" content="Sign in with your Bitcoin wallet using the Auth47 protocol. No username, no password.">
   <meta name="twitter:image" content="https://paymentcode.io/logos/favicons/android-chrome-512x512.png">
 
+  <link rel="canonical" href="https://paymentcode.io/auth">
   <title>Auth47 Login — BIP47 & PayNyms</title>
   <link rel="icon" type="image/x-icon" href="/logos/favicons/favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="/logos/favicons/favicon-32x32.png">
@@ -384,13 +385,14 @@
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="container">
     <div class="nav-bar">
       <a href="/" class="back-link">← Back to Home</a>
       <span style="color: var(--text-muted); font-size: 0.8rem;">[AUTH47 LOGIN]</span>
     </div>
 
-    <div class="main-content">
+    <main class="main-content" id="main">
       <div class="header">
         <h1>> AUTH47 LOGIN</h1>
         <div class="auth-subtitle">Bitcoin-based authentication using auth47 protocol</div>
@@ -489,7 +491,7 @@
           <li>Wait for automatic verification</li>
         </ol>
       </div>
-    </div>
+    </main>
   </div>
 
   <div class="footer">
@@ -621,7 +623,7 @@
             const avatarImg = document.getElementById('avatar');
             const placeholder = document.getElementById('avatar-placeholder');
 
-            avatarImg.src = `https://paynym.rs/${primaryCode}/avatar`;
+            avatarImg.src = `/api/paynym/avatar/${primaryCode}`;
             avatarImg.onload = () => {
               placeholder.style.display = 'none';
               avatarImg.classList.add('show');

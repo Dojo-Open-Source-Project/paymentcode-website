@@ -1,0 +1,10 @@
+User-agent: *
+Allow: /
+
+# Auth flows and the API surface carry no indexable content.
+Disallow: /callback
+Disallow: /api/
+Disallow: /start-auth
+Disallow: /check-auth/
+
+Sitemap: https://paymentcode.io/sitemap.xml

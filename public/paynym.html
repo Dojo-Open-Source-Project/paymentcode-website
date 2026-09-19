@@ -21,6 +21,7 @@
   <meta name="twitter:description" content="Search and explore PayNym identities. Discover Bitcoin payment codes linked to human-readable names.">
   <meta name="twitter:image" content="https://paymentcode.io/logos/favicons/android-chrome-512x512.png">
 
+  <link rel="canonical" href="https://paymentcode.io/paynym">
   <title>The Explorer — BIP47 & PayNyms</title>
   <link rel="icon" type="image/x-icon" href="/logos/favicons/favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="/logos/favicons/favicon-32x32.png">
@@ -497,13 +498,14 @@
   </style>
 </head>
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
   <div class="container">
     <div class="nav-bar">
       <a href="/" class="back-link">← Back to Home</a>
       <span style="color: var(--text-muted); font-size: 0.8rem;">[PAYNYM EXPLORER]</span>
     </div>
     
-    <div class="main-content">
+    <main class="main-content" id="main">
       <div class="header">
           <h1>> PAYNYM EXPLORER</h1>
           <div class="subtitle">Search and explore PayNym identities</div>
@@ -534,14 +536,13 @@
           <div class="empty-icon">🔍</div>
           <p>Enter a payment code, nymID, or nymName to explore</p>
         </div>
-      </div>
+      </main>
     </div>
     
     <div class="footer">
       <div class="footer-text">Built with <span class="footer-heart">♥</span> for the cypherpunk community</div>
       <div class="footer-text">Privacy is a human fight</div>
     </div>
-  </div>
 
   <script>
     // Detect if input is a nymName (rather than a payment code)
@@ -606,7 +607,7 @@
       } catch (error) {
         resultsContainer.innerHTML = `
           <div class="error">
-            <div class="error-icon">❌</div>
+            <div class="error-icon" aria-hidden="true">❌</div>
             <div>${error.message}</div>
           </div>
         `;
@@ -631,7 +632,7 @@
       
       // Use first code for avatar
       const primaryCode = data.codes && data.codes.length > 0 ? data.codes[0].code : '';
-      const avatarUrl = primaryCode ? `https://paynym.rs/${primaryCode}/avatar` : '';
+      const avatarUrl = primaryCode ? `/api/paynym/avatar/${primaryCode}` : '';
       
       // Build payment codes HTML with copy and QR buttons
       const codesHtml = data.codes.map((code, index) => `

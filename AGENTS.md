@@ -107,7 +107,12 @@ ABOUT → Static content
 | Method | Endpoint | Purpose | Auth Required |
 |---------|-----------|----------|---------------|
 | POST | `/api/paynym/lookup` | Search Paynym by ID/name | No |
-| POST | `/api/paynym/followers` | Get follower details | No |
+| POST | `/api/paynym/followers` | Get follower details (max 50 ids per call) | No |
+| GET | `/api/paynym/avatar/:code` | Proxy + cache a Paynym avatar | No |
+
+**Never link avatars straight to `paynym.rs` from the frontend.** Doing so
+hands every visitor's IP and referer to a third party and breaks the strict
+`img-src 'self'` CSP. Use `/api/paynym/avatar/:code` instead.
 
 #### BIP47 LAB Endpoints
 | Method | Endpoint | Purpose | Auth Required |
@@ -378,7 +383,7 @@ NODE_ENV=development
    # BIP47 LAB - Validate payment code
    curl -X POST http://localhost:3000/api/bip47/validate \
      -H "Content-Type: application/json" \
-     -d '{"paymentCode":"PM8TJYp8zHvhimVNRjUcEuULfmvmUML6YTbTSnU69MYy93AzsXELFLaVjpxc5mxDex7R8ttgtL1tGAt2TshZAoFeB5zn4c9nRo4oZpmuyuo4FTpUrd"}'
+     -d '{"paymentCode":"PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW"}'
    ```
 
 ### Testing Error Handling
@@ -714,6 +719,40 @@ railway logs
 - All signature verification happens server-side
 - Payment codes are public (BIP47 design)
 - No private keys are stored or handled
+
+### Request limits
+
+Every externally reachable endpoint is bounded. When adding a route, give it a
+limiter and validate input length before the value reaches a library or an
+upstream URL.
+
+| Limit | Value | Where |
+|-------|-------|-------|
+| JSON body | 32 kb | `express.json` |
+| Guestbook message | 500 chars | `MAX_MESSAGE_LENGTH` |
+| Follower ids per request | 50 | `MAX_FOLLOWER_IDS` |
+| Upstream concurrency | 5 | `FOLLOWER_CONCURRENCY` |
+| QR text | 512 chars | `MAX_QR_TEXT_LENGTH` |
+| Upstream timeout | 8s | `UPSTREAM_TIMEOUT_MS` |
+| Paynym lookups | 10/min/IP | `paynymLimiter` |
+| Avatars | 120/min/IP | `avatarLimiter` |
+| Auth endpoints | 30/15min/IP | `authLimiter` |
+| Guestbook submit | 5/hour/IP | `submitLimiter` |
+
+### CORS
+
+CORS is opened only on the read-only lookup endpoints (`publicApiCors`). Auth
+and guestbook writes stay same-origin so a third-party page cannot drive them
+from a visitor's browser. Do not add `publicApiCors` to a state-changing route.
+
+### A valid test payment code
+
+BIP47 v1 payment codes are **116 base58 characters**. This one is generated
+from a throwaway seed and passes `/api/bip47/validate`:
+
+```
+PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW
+```
 
 ## Future Enhancements
 

@@ -2,9 +2,9 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { MongoClient } from 'mongodb';
 import ecc from '@bitcoinerlab/secp256k1';
-import { BIP32Factory } from 'bip32';
 import { BIP47Factory } from '@samouraiwallet/bip47';
 import { networks } from '@samouraiwallet/bip47/utils';
 import { Auth47Verifier } from '@samouraiwallet/auth47';
@@ -19,6 +19,22 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// Request limits. Every one of these was previously unbounded, which let a
+// single request pin the CPU, bloat the database, or turn this server into an
+// amplifier against paynym.rs.
+const MAX_MESSAGE_LENGTH = 500;   // matches the textarea maxlength in guestbook.html
+const MAX_FOLLOWER_IDS = 50;      // per /api/paynym/followers request
+const FOLLOWER_CONCURRENCY = 5;   // simultaneous upstream fetches
+const MAX_QR_TEXT_LENGTH = 512;
+
+// Payment codes are base58; anything else must never reach an upstream URL.
+const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{1,120}$/;
+
+// Railway terminates TLS one hop in front of us, so req.ip needs the real
+// client address for rate limiting to key on anything meaningful.
+app.set('trust proxy', 1);
 
 // MongoDB connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/bip47-guestbook';
@@ -46,7 +62,47 @@ async function connectToDatabase() {
 // Initialize database connection
 connectToDatabase();
 
-app.use(cors());
+// Security headers. Every asset, font and avatar is served from this origin,
+// so the CSP can stay narrow. 'unsafe-inline' is still needed because page
+// styles and scripts currently live inline in the HTML.
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self' 'unsafe-inline'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "object-src 'none'"
+  ].join('; '));
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=()');
+  next();
+});
+
+// CORS is opened only on the read-only lookup endpoints that the docs page
+// advertises as a public API. Auth and guestbook writes stay same-origin so a
+// third-party page cannot drive them from a visitor's browser.
+const publicApiCors = cors({ origin: '*', methods: ['GET', 'POST'] });
+
+// Rate limits, tuned per endpoint cost. AGENTS.md calls for ~10/min against
+// the Paynym API; avatars get a higher ceiling because one profile view loads
+// many of them, and they are served from cache after the first hit.
+const rateLimitOpts = { standardHeaders: 'draft-7', legacyHeaders: false };
+const makeLimiter = (windowMs, limit, message) =>
+  rateLimit({ ...rateLimitOpts, windowMs, limit, message: { error: message } });
+
+const paynymLimiter = makeLimiter(60 * 1000, 10, 'Too many lookups. Please wait a minute.');
+const avatarLimiter = makeLimiter(60 * 1000, 120, 'Too many avatar requests.');
+const authLimiter = makeLimiter(15 * 60 * 1000, 30, 'Too many authentication attempts.');
+const qrLimiter = makeLimiter(60 * 1000, 30, 'Too many QR requests.');
+const submitLimiter = makeLimiter(60 * 60 * 1000, 5, 'Too many messages. Please try again later.');
+const labLimiter = makeLimiter(60 * 1000, 60, 'Too many requests.');
 
 // Advertise Tor hidden service to Tor Browser (Onion-Location standard)
 if (process.env.ONION_ADDRESS) {
@@ -56,11 +112,10 @@ if (process.env.ONION_ADDRESS) {
   });
 }
 
-app.use(express.json());
-app.use(express.static('public'));
+app.use(express.json({ limit: '32kb' }));
+app.use(express.static(PUBLIC_DIR, { maxAge: '1h' }));
 
-// Initialize BIP32 and BIP47 with ECC
-const bip32 = BIP32Factory(ecc);
+// Initialize BIP47 with ECC
 const bip47 = BIP47Factory(ecc);
 const bitcoinjsMessage = bitcoinMessageFactory(ecc);
 
@@ -75,7 +130,7 @@ const verifier = new Auth47Verifier(ecc, CALLBACK_URL);
 const pendingAuths = new Map();
 
 // Generate Auth47 URI
-app.get('/start-auth', async (req, res) => {
+app.get('/start-auth', authLimiter, async (req, res) => {
   try {
     const nonce = crypto.randomBytes(16).toString('hex');
     
@@ -119,7 +174,7 @@ app.get('/start-auth', async (req, res) => {
 });
 
 // Check auth status (polling endpoint)
-app.get('/check-auth/:nonce', (req, res) => {
+app.get('/check-auth/:nonce', authLimiter, (req, res) => {
   // Disable caching to ensure fresh auth status
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.set('Pragma', 'no-cache');
@@ -146,7 +201,7 @@ app.get('/check-auth/:nonce', (req, res) => {
 });
 
 // Verify Auth47 proof
-app.post('/verify', async (req, res) => {
+app.post('/verify', authLimiter, async (req, res) => {
   try {
     console.log('📥 Received verification request:', JSON.stringify(req.body, null, 2));
     
@@ -362,130 +417,233 @@ app.post('/callback', async (req, res) => {
 
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    pendingAuths: pendingAuths.size,
-    verified: Array.from(pendingAuths.values()).filter(a => a.verified).length
+  res.json({
+    status: 'ok',
+    database: db ? 'connected' : 'unavailable'
   });
 });
 
+// --- Paynym upstream helpers ------------------------------------------------
+
+// Overridable so the proxy can be exercised against a stub in tests.
+const PAYNYM_ORIGIN = process.env.PAYNYM_ORIGIN || 'https://paynym.rs';
+const PAYNYM_API = `${PAYNYM_ORIGIN}/api/v1/nym/`;
+const UPSTREAM_TIMEOUT_MS = 8000;
+const NYM_CACHE_TTL = 5 * 60 * 1000;
+const AVATAR_CACHE_TTL = 60 * 60 * 1000;
+
+const nymCache = new Map();
+const avatarCache = new Map();
+
+function cacheGet(cache, key, ttl) {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.timestamp > ttl) {
+    cache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function cacheSet(cache, key, value, maxEntries = 500) {
+  // Oldest-first eviction keeps these caches from growing without bound.
+  if (cache.size >= maxEntries) cache.delete(cache.keys().next().value);
+  cache.set(key, { value, timestamp: Date.now() });
+}
+
+function primaryCodeOf(data) {
+  return data?.codes?.length ? data.codes[0].code : null;
+}
+
+// Avatars are proxied through this server rather than linked straight to
+// paynym.rs, so a visitor's browser never contacts a third party.
+function avatarPath(code) {
+  return code ? `/api/paynym/avatar/${code}` : null;
+}
+
+async function fetchNym(nym) {
+  const cached = cacheGet(nymCache, nym, NYM_CACHE_TTL);
+  if (cached) return cached;
+
+  const response = await fetch(PAYNYM_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nym }),
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
+  });
+
+  const text = await response.text();
+  if (!response.ok || !text || text.trim() === '') return null;
+
+  const data = JSON.parse(text);
+  cacheSet(nymCache, nym, data);
+  return data;
+}
+
+// Same as fetchNym, but swallows failures for the call sites where a missing
+// Paynym is not an error worth failing the whole request over.
+async function fetchNymSafe(nym) {
+  try {
+    return await fetchNym(nym);
+  } catch (error) {
+    console.error(`❌ Paynym fetch failed for ${nym}:`, error.message);
+    return null;
+  }
+}
+
+// Runs fn over items with a ceiling on simultaneous work. Promise.all over an
+// unbounded array previously let one request fan out arbitrarily wide upstream.
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 // Paynym API proxy endpoint
-app.post('/api/paynym/lookup', async (req, res) => {
+app.post('/api/paynym/lookup', paynymLimiter, publicApiCors, async (req, res) => {
   try {
     const { nym } = req.body;
-    
-    if (!nym) {
+
+    if (!nym || typeof nym !== 'string') {
       return res.status(400).json({ error: 'Missing nym parameter' });
     }
-    
-    console.log(`🔍 Looking up Paynym: ${nym}`);
-    
-    // Call paynym.rs API
-    const response = await fetch('https://paynym.rs/api/v1/nym/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ nym })
-    });
-    
-    // Check if response body is empty
-    const text = await response.text();
-    if (!text || text.trim() === '') {
-      console.error(`❌ Paynym lookup failed: Empty response from API`);
-      return res.status(404).json({ 
-        error: 'Paynym not found. Please check the nymID or nymName and try again.' 
-      });
+
+    if (nym.length > 120) {
+      return res.status(400).json({ error: 'nym parameter is too long' });
     }
-    
-    // Parse JSON
+
+    const cached = cacheGet(nymCache, nym, NYM_CACHE_TTL);
+    if (cached) {
+      console.log(`✅ Paynym cache hit: ${cached.nymName}`);
+      return res.json(cached);
+    }
+
+    console.log(`🔍 Looking up Paynym: ${nym}`);
+
     let data;
     try {
-      data = JSON.parse(text);
+      data = await fetchNym(nym);
     } catch (parseError) {
-      console.error(`❌ Failed to parse API response:`, parseError.message);
-      return res.status(500).json({ 
-        error: 'Invalid response from Paynym API' 
+      console.error(`❌ Failed to read API response:`, parseError.message);
+      return res.status(502).json({ error: 'Invalid response from Paynym API' });
+    }
+
+    if (!data) {
+      console.error(`❌ Paynym lookup failed: no result from API`);
+      return res.status(404).json({
+        error: 'Paynym not found. Please check the nymID or nymName and try again.'
       });
     }
-    
-    if (!response.ok) {
-      console.error(`❌ Paynym lookup failed: ${data.error || response.statusText}`);
-      return res.status(response.status).json({ 
-        error: data.error || 'Paynym not found' 
-      });
-    }
-    
+
     console.log(`✅ Paynym found: ${data.nymName}`);
     res.json(data);
-    
+
   } catch (error) {
     console.error('💥 Paynym lookup error:', error);
-    res.status(500).json({ 
-      error: 'Failed to lookup Paynym' 
+    res.status(500).json({ error: 'Failed to lookup Paynym' });
+  }
+});
+
+// Avatar proxy. Keeps visitor IPs off paynym.rs and lets the strict img-src
+// CSP stay at 'self'. The payment code is validated before it reaches a URL.
+app.get('/api/paynym/avatar/:code', avatarLimiter, async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    if (!BASE58_RE.test(code)) {
+      return res.status(400).json({ error: 'Invalid payment code' });
+    }
+
+    const cached = cacheGet(avatarCache, code, AVATAR_CACHE_TTL);
+    if (cached) {
+      res.setHeader('Content-Type', cached.contentType);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.send(cached.body);
+    }
+
+    const upstream = await fetch(`${PAYNYM_ORIGIN}/${code}/avatar`, {
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
     });
+
+    if (!upstream.ok) {
+      return res.status(404).json({ error: 'Avatar not found' });
+    }
+
+    const contentType = upstream.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) {
+      console.error(`❌ Unexpected avatar content-type: ${contentType}`);
+      return res.status(502).json({ error: 'Unexpected avatar response' });
+    }
+
+    const body = Buffer.from(await upstream.arrayBuffer());
+    cacheSet(avatarCache, code, { body, contentType }, 200);
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(body);
+
+  } catch (error) {
+    console.error('💥 Avatar proxy error:', error.message);
+    res.status(502).json({ error: 'Failed to fetch avatar' });
   }
 });
 
 // Batch Paynym details endpoint for followers
-app.post('/api/paynym/followers', async (req, res) => {
+app.post('/api/paynym/followers', paynymLimiter, publicApiCors, async (req, res) => {
   try {
     const { nymIds } = req.body;
-    
+
     if (!nymIds || !Array.isArray(nymIds)) {
       return res.status(400).json({ error: 'Missing or invalid nymIds parameter' });
     }
-    
+
     if (nymIds.length === 0) {
       return res.json([]);
     }
-    
-    console.log(`🔍 Fetching details for ${nymIds.length} followers`);
-    
-    // Fetch details for each follower in parallel
-    const followerPromises = nymIds.map(async (nymId) => {
-      try {
-        const response = await fetch('https://paynym.rs/api/v1/nym/', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ nym: nymId })
-        });
-        
-        if (!response.ok) {
-          return { nymId, error: 'Not found' };
-        }
-        
-        const data = await response.json();
-        
-        // Get primary payment code for avatar
-        const primaryCode = data.codes && data.codes.length > 0 ? data.codes[0].code : '';
-        
-        return {
-          nymId: data.nymID,
-          nymName: data.nymName || 'Unknown',
-          avatarUrl: primaryCode ? `https://paynym.rs/${primaryCode}/avatar` : null,
-          primaryCode: primaryCode
-        };
-      } catch (error) {
-        console.error(`❌ Error fetching follower ${nymId}:`, error.message);
-        return { nymId, error: 'Failed to fetch' };
-      }
+
+    // Cap the batch and the concurrency. Without both, one request could fan
+    // out arbitrarily many simultaneous fetches at paynym.rs.
+    const requested = nymIds
+      .filter(id => typeof id === 'string' && id.length <= 120)
+      .slice(0, MAX_FOLLOWER_IDS);
+
+    if (requested.length < nymIds.length) {
+      console.log(`⚠️  Trimmed follower batch from ${nymIds.length} to ${requested.length}`);
+    }
+
+    console.log(`🔍 Fetching details for ${requested.length} followers`);
+
+    const followers = await mapWithConcurrency(requested, FOLLOWER_CONCURRENCY, async (nymId) => {
+      const data = await fetchNymSafe(nymId);
+      if (!data) return null;
+
+      const primaryCode = primaryCodeOf(data);
+      return {
+        nymId: data.nymID,
+        nymName: data.nymName || 'Unknown',
+        avatarUrl: avatarPath(primaryCode),
+        primaryCode: primaryCode || ''
+      };
     });
 
-    const followers = await Promise.all(followerPromises);
-    
-    // Filter out failed fetches
-    const validFollowers = followers.filter(f => !f.error);
-    
+    const validFollowers = followers.filter(Boolean);
+
     console.log(`✅ Successfully fetched ${validFollowers.length} follower details`);
     res.json(validFollowers);
-    
+
   } catch (error) {
     console.error('💥 Batch followers error:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch follower details' 
+    res.status(500).json({
+      error: 'Failed to fetch follower details'
     });
   }
 });
@@ -508,12 +666,16 @@ app.get('/', (req, res) => {
 // BIP47 LAB API endpoints - Client-side payment code tools
 
 // Payment Code Validator
-app.post('/api/bip47/validate', (req, res) => {
+app.post('/api/bip47/validate', labLimiter, publicApiCors, (req, res) => {
   try {
     const { paymentCode } = req.body;
 
-    if (!paymentCode) {
+    if (!paymentCode || typeof paymentCode !== 'string') {
       return res.status(400).json({ error: 'Payment code required' });
+    }
+
+    if (paymentCode.length > 200) {
+      return res.status(400).json({ error: 'Payment code is too long' });
     }
 
     const checks = {
@@ -553,7 +715,7 @@ app.post('/api/bip47/validate', (req, res) => {
 });
 
 // BIP47 Message Verifier - Verify message signed with notification address
-app.post('/api/bip47/verify-message', async (req, res) => {
+app.post('/api/bip47/verify-message', labLimiter, publicApiCors, async (req, res) => {
   try {
     const { paymentCode, message, signature } = req.body;
 
@@ -600,29 +762,9 @@ app.post('/api/bip47/verify-message', async (req, res) => {
     }
 
     // Try to fetch Paynym details for additional info
-    let nymName = null;
-    let avatarUrl = null;
-    try {
-      const paynymResponse = await fetch('https://paynym.rs/api/v1/nym/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nym: paymentCode })
-      });
-
-      if (paynymResponse.ok) {
-        const paynymData = await paynymResponse.json();
-        nymName = paynymData.nymName || null;
-        const primaryCode = paynymData.codes && paynymData.codes.length > 0 
-          ? paynymData.codes[0].code 
-          : null;
-        if (primaryCode) {
-          avatarUrl = `https://paynym.rs/${primaryCode}/avatar`;
-        }
-      }
-    } catch (fetchError) {
-      // Continue without Paynym details
-      console.log('⚠️  Could not fetch Paynym details:', fetchError.message);
-    }
+    const paynymData = await fetchNymSafe(paymentCode);
+    const nymName = paynymData?.nymName || null;
+    const avatarUrl = avatarPath(primaryCodeOf(paynymData));
 
     console.log(`${isValid ? '✅' : '❌'} Message verification ${isValid ? 'successful' : 'failed'}`);
 
@@ -664,12 +806,19 @@ app.get('/about', (req, res) => {
 });
 
 // QR Code generation endpoint for payment codes
-app.get('/api/qr', async (req, res) => {
+app.get('/api/qr', qrLimiter, async (req, res) => {
   try {
     const { text } = req.query;
-    
-    if (!text) {
+
+    if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'Missing text parameter' });
+    }
+
+    // Unbounded input here was a cheap way to make the server do expensive work.
+    if (text.length > MAX_QR_TEXT_LENGTH) {
+      return res.status(400).json({
+        error: `Text too long (max ${MAX_QR_TEXT_LENGTH} characters)`
+      });
     }
     
     const qr = await QRCode.toDataURL(text);
@@ -696,8 +845,18 @@ app.get('/api/guestbook/messages', async (req, res) => {
       .sort({ createdAt: -1 })
       .toArray();
 
-    console.log(`✅ Retrieved ${messages.length} messages`);
-    res.json(messages);
+    // Rows written before the avatar proxy existed hold absolute paynym.rs
+    // URLs. Rewrite them on read so old messages keep their avatars without
+    // needing a migration, and without the browser hitting a third party.
+    const normalized = messages.map(msg => {
+      const legacy = typeof msg.nymAvatar === 'string'
+        ? msg.nymAvatar.match(/^https?:\/\/paynym\.rs\/([1-9A-HJ-NP-Za-km-z]+)\/avatar$/)
+        : null;
+      return legacy ? { ...msg, nymAvatar: avatarPath(legacy[1]) } : msg;
+    });
+
+    console.log(`✅ Retrieved ${normalized.length} messages`);
+    res.json(normalized);
 
   } catch (error) {
     console.error('💥 Error fetching messages:', error);
@@ -706,13 +865,26 @@ app.get('/api/guestbook/messages', async (req, res) => {
 });
 
 // POST /api/guestbook/submit - Submit new message with Auth47
-app.post('/api/guestbook/submit', async (req, res) => {
+app.post('/api/guestbook/submit', submitLimiter, async (req, res) => {
   try {
     const { nonce, message, challenge, signature, nym } = req.body;
 
     if (!nonce || !message || !challenge || !signature || !nym) {
       return res.status(400).json({ 
         error: 'Missing required fields: nonce, message, challenge, signature, nym' 
+      });
+    }
+
+    // The textarea enforces this client-side; the server has to as well, or
+    // anyone posting directly to the API can store arbitrarily large documents.
+    if (typeof message !== 'string' || message.trim().length === 0) {
+      return res.status(400).json({ error: 'Message must be a non-empty string' });
+    }
+
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
+      return res.status(400).json({
+        error: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`
       });
     }
 
@@ -733,33 +905,12 @@ app.post('/api/guestbook/submit', async (req, res) => {
     console.log(`📝 Submitting message from ${nym}`);
 
     // Fetch Paynym details including avatar
-    let nymName = nym;
-    let nymAvatar = null;
-    try {
-      const paynymResponse = await fetch('https://paynym.rs/api/v1/nym/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nym })
-      });
+    const paynymData = await fetchNymSafe(nym);
+    const nymName = paynymData?.nymName || nym;
+    const nymAvatar = avatarPath(primaryCodeOf(paynymData));
 
-      if (paynymResponse.ok) {
-        const paynymData = await paynymResponse.json();
-        nymName = paynymData.nymName || nym;
-        
-        // Get avatar URL from primary payment code
-        const primaryCode = paynymData.codes && paynymData.codes.length > 0 
-          ? paynymData.codes[0].code 
-          : null;
-        
-        if (primaryCode) {
-          nymAvatar = `https://paynym.rs/${primaryCode}/avatar`;
-        }
-        
-        console.log(`✅ Fetched Paynym: ${nymName}, avatar: ${nymAvatar ? 'yes' : 'no'}`);
-      }
-    } catch (fetchError) {
-      console.error('⚠️  Failed to fetch Paynym details:', fetchError.message);
-      // Continue without avatar - still allow message submission
+    if (paynymData) {
+      console.log(`✅ Fetched Paynym: ${nymName}, avatar: ${nymAvatar ? 'yes' : 'no'}`);
     }
 
     // Store message in database
@@ -767,7 +918,7 @@ app.post('/api/guestbook/submit', async (req, res) => {
       paymentCode: nym,
       nymName,
       nymAvatar,
-      message,
+      message: trimmedMessage,
       signature,
       verified: true,
       createdAt: new Date(),
@@ -791,6 +942,14 @@ app.post('/api/guestbook/submit', async (req, res) => {
     console.error('💥 Error submitting message:', error);
     res.status(500).json({ error: 'Failed to submit message' });
   }
+});
+
+// Unknown routes. Without this, Express serves its own unstyled HTML page.
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  res.status(404).sendFile(path.join(PUBLIC_DIR, '404.html'));
 });
 
 app.listen(PORT, () => {
