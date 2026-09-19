@@ -1,26 +1,29 @@
 {
   "name": "bip47-terminal",
   "version": "1.0.0",
+  "description": "BIP47 payment code and PayNym explorer with Auth47 authentication",
+  "license": "MIT",
   "type": "module",
+  "engines": {
+    "node": ">=24.0.0"
+  },
   "scripts": {
     "start": "node server.js",
     "dev": "node server.js",
     "build": "echo 'Building BIP47 Terminal...' && ls -la public/ && echo 'Public directory contents verified'",
-    "railway:deploy": "railway up"
-  },
-  "engines": {
-    "node": ">=18.0.0"
+    "railway:deploy": "railway up",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^1.1.1",
-    "@samouraiwallet/auth47": "^1.0.1",
-    "@samouraiwallet/bip47": "^1.0.3",
-    "@samouraiwallet/bitcoinjs-message": "^3.1.1",
+    "@dojo-tools/auth47": "^2.0.1",
+    "@dojo-tools/bip47": "^2.0.1",
+    "@dojo-tools/bitcoinjs-message": "^4.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",
+    "express-rate-limit": "^7.4.1",
     "mongodb": "^6.3.0",
-    "node-fetch": "^3.3.2",
     "qrcode": "^1.5.3"
   }
 }

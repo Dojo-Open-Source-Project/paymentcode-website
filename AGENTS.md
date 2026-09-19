@@ -8,8 +8,11 @@ This is a Node.js/Express web application implementing BIP47 Auth47 authenticati
 
 **Tech Stack:**
 - Backend: Node.js with Express (ES modules)
+- **Node 24 or later.** `@dojo-tools/*` declares `engines: >=24`. The app does
+  in fact run on Node 22 (the test suite passes there), but the floor matches
+  what the dependencies ask for. `.nvmrc` pins 24 so Nixpacks builds on it.
 - Frontend: Vanilla HTML/CSS/JavaScript
-- Cryptography: @bitcoinerlab/secp256k1, @samouraiwallet/bip47
+- Cryptography: @bitcoinerlab/secp256k1, @dojo-tools/bip47
 - Deployment: Railway (production), localhost (development)
 
 ## Project Vision & Roadmap
@@ -107,7 +110,12 @@ ABOUT → Static content
 | Method | Endpoint | Purpose | Auth Required |
 |---------|-----------|----------|---------------|
 | POST | `/api/paynym/lookup` | Search Paynym by ID/name | No |
-| POST | `/api/paynym/followers` | Get follower details | No |
+| POST | `/api/paynym/followers` | Get follower details (max 50 ids per call) | No |
+| GET | `/api/paynym/avatar/:code` | Proxy + cache a Paynym avatar | No |
+
+**Never link avatars straight to `paynym.rs` from the frontend.** Doing so
+hands every visitor's IP and referer to a third party and breaks the strict
+`img-src 'self'` CSP. Use `/api/paynym/avatar/:code` instead.
 
 #### BIP47 LAB Endpoints
 | Method | Endpoint | Purpose | Auth Required |
@@ -378,7 +386,7 @@ NODE_ENV=development
    # BIP47 LAB - Validate payment code
    curl -X POST http://localhost:3000/api/bip47/validate \
      -H "Content-Type: application/json" \
-     -d '{"paymentCode":"PM8TJYp8zHvhimVNRjUcEuULfmvmUML6YTbTSnU69MYy93AzsXELFLaVjpxc5mxDex7R8ttgtL1tGAt2TshZAoFeB5zn4c9nRo4oZpmuyuo4FTpUrd"}'
+     -d '{"paymentCode":"PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW"}'
    ```
 
 ### Testing Error Handling
@@ -440,16 +448,40 @@ bip47-website/
 │   ├── guestbook.html  # Guestbook with Auth47
 │   ├── auth.html       # Auth47 demo
 │   ├── callback.html   # Wallet callback page
+│   ├── 404.html        # Not-found page
+│   ├── styles.css      # Shared design system + @font-face
+│   ├── css/            # One stylesheet per page (<page>.css)
+│   ├── js/             # One script per page, plus common.js
+│   ├── fonts/          # Self-hosted variable fonts
 │   └── logos/          # Project logos for SUPPORTED BY sections
-│       ├── samourai.png
-│       ├── sparrow.png
-│       ├── bluewallet.png
-│       ├── stack.png
-│       └── Ashigaru.png
 ├── server.js           # Express server (all backend logic)
 ├── package.json        # Dependencies
+├── package-lock.json   # Committed: deploys must be reproducible
 └── AGENTS.md          # This file
 ```
+
+**No inline `<style>` or `<script>` blocks, and no inline event handlers.**
+The CSP sets `script-src 'self'`, so an `onclick="..."` attribute will simply
+not fire. Pages declare behaviour with `data-action` attributes and register a
+handler in their own script:
+
+```html
+<button data-action="do-thing" data-id="42">Go</button>
+```
+```javascript
+registerActions({
+  'do-thing': (el) => doThing(el.dataset.id)
+});
+```
+
+`common.js` provides `escapeHtml()`, `registerActions()` and
+`registerImageFallbacks()` (use `data-on-error="hide"` or `"placeholder"`
+instead of an `onerror` attribute). Always run API-sourced strings through
+`escapeHtml()` before interpolating them into `innerHTML` — including inside
+attributes, where unescaped quotes would break out.
+
+Full-width buttons opt in with `class="btn-block"`; buttons are auto-width by
+default.
 
 ## UI Components
 
@@ -459,15 +491,23 @@ The project features a "SUPPORTED BY" showcase section that displays logos of BI
 
 **Main Page (index.html):**
 - Full-width section below the card grid
-- Displays 5 project logos: Samourai, Sparrow, BlueWallet, Stack, Ashigaru
+- Displays 11 project logos: Samourai, Sparrow, BlueWallet, Stack, Ashigaru,
+  Lincoin, Mynymbox, The Bitcoin Company, Dojo, The Dojo Bay, BIP47DB
 - Grayscale logos that turn colorful on hover
 - Links to external project websites
 
 **Auth Page (auth.html):**
-- Compact version inside the auth-card
-- Displays 3 Auth47-compatible wallets: Samourai, Ashigaru, Sparrow
+- Compact version inside the auth-card, split into two labelled columns
+- Clients: Samourai, Ashigaru, Sparrow
+- Servers: The Bitcoin Company, PayNym.rs, Dojo, The Dojo Bay
+- Each entry carries a `.logo-name` caption under the icon
 - Centered below the "Generate Auth QR Code" button
 - Same hover effects as main page
+
+**Adding a logo:** drop a 512x512 PNG into `public/logos/` (lowercase filename)
+and add an `<a class="logo-link">` entry. The auth page list is Auth47
+implementations specifically, so only add an entry there if the project
+actually speaks Auth47, and put it in the right column.
 
 **Styling (styles.css):**
 ```css
@@ -684,7 +724,16 @@ railway logs
 ## Key Dependencies
 
 - **@bitcoinerlab/secp256k1**: Bitcoin cryptography (signature verification)
-- **@samouraiwallet/bip47**: BIP47 payment code implementation
+- **@dojo-tools/bip47**: BIP47 payment code implementation
+- **@dojo-tools/auth47**: Auth47 protocol (verification is NOT resource-bound;
+  see the Auth47 resource binding section)
+- **@dojo-tools/bitcoinjs-message**: Bitcoin message signing/verification
+
+These were `@samouraiwallet/*` until the projects moved to the
+[dojo-tools](https://github.com/Dojo-Open-Source-Project/dojo-tools) monorepo.
+The public API is unchanged across that move, and payment codes, notification
+addresses and signatures are byte-identical between the old and new versions,
+so the migration was import renames only.
 - **express**: Web server framework
 - **cors**: Cross-origin resource sharing
 - **qrcode**: QR code generation
@@ -709,11 +758,76 @@ railway logs
 
 ## Security Considerations
 
+- **Auth47 proofs MUST be bound to this site's resource URL.** See below.
 - Nonces expire after 5 minutes
 - Each nonce can only be used once
 - All signature verification happens server-side
 - Payment codes are public (BIP47 design)
 - No private keys are stored or handled
+
+### Auth47 resource binding (do not remove)
+
+`Auth47Verifier.verifyProof()` answers "is this signed?", not "is this signed
+**for me**?". It validates that the challenge's `r` parses as an http(s) URL,
+but it has no idea which URL is ours. Without comparing `r` to our own callback
+URL, an attacker can request a live nonce here, show a victim the same challenge
+with `r` naming the attacker's site, and relay the victim's genuine signature
+back to us — creating a session in the victim's name. Nonce expiry, single use
+and a valid signature do not prevent this.
+
+Every proof therefore goes through `verifyAuth47Proof(proof, expectedResource)`
+in `server.js`, which takes the expected resource as a **required** argument and
+throws without it. Both `/verify` and `/callback` call it; never verify a proof
+by calling `verifier.verifyProof()` directly, and never add a third entry point
+that skips it.
+
+The rule worth keeping generally: *no verification function may take only the
+thing being verified.* It must also take the expectation, so that omitting the
+binding is a missing argument rather than an invisible silence.
+
+Regression tests live in `test/auth47-resource-binding.test.mjs`:
+
+```bash
+npm test
+```
+
+They spawn a real server and relay a genuinely-signed proof at it. If the
+binding is removed, three of them fail. Reported by maxtannahill of
+[The Dojo Bay](https://dojobay.org).
+
+### Request limits
+
+Every externally reachable endpoint is bounded. When adding a route, give it a
+limiter and validate input length before the value reaches a library or an
+upstream URL.
+
+| Limit | Value | Where |
+|-------|-------|-------|
+| JSON body | 32 kb | `express.json` |
+| Guestbook message | 500 chars | `MAX_MESSAGE_LENGTH` |
+| Follower ids per request | 50 | `MAX_FOLLOWER_IDS` |
+| Upstream concurrency | 5 | `FOLLOWER_CONCURRENCY` |
+| QR text | 512 chars | `MAX_QR_TEXT_LENGTH` |
+| Upstream timeout | 8s | `UPSTREAM_TIMEOUT_MS` |
+| Paynym lookups | 10/min/IP | `paynymLimiter` |
+| Avatars | 120/min/IP | `avatarLimiter` |
+| Auth endpoints | 30/15min/IP | `authLimiter` |
+| Guestbook submit | 5/hour/IP | `submitLimiter` |
+
+### CORS
+
+CORS is opened only on the read-only lookup endpoints (`publicApiCors`). Auth
+and guestbook writes stay same-origin so a third-party page cannot drive them
+from a visitor's browser. Do not add `publicApiCors` to a state-changing route.
+
+### A valid test payment code
+
+BIP47 v1 payment codes are **116 base58 characters**. This one is generated
+from a throwaway seed and passes `/api/bip47/validate`:
+
+```
+PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW
+```
 
 ## Future Enhancements
 
@@ -918,7 +1032,7 @@ app.post('/api/paynym/lookup', async (req, res) => {
 
 ## Getting Help
 
-- **BIP47 Protocol**: [Samourai Wallet docs](https://samouraiwallet.com/)
+- **BIP47 Protocol**: [Samourai Wallet docs](https://freesamourai.com/)
 - **Paynym API**: Check `paynym-api.md` for API documentation
 - **Railway**: [Railway documentation](https://docs.railway.app/)
 - **Issues**: Create a GitHub issue for bugs or feature requests

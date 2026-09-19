@@ -110,13 +110,17 @@ bip47-terminal/
 └── README.md              # This file
 ```
 
+## Requirements
+
+Node 24 or later (`@dojo-tools/*` declares `engines: >=24`; `.nvmrc` pins it).
+
 ## Dependencies
 
 - **express** - Web server framework
 - **cors** - Cross-origin resource sharing
 - **@bitcoinerlab/secp256k1** - Bitcoin cryptography
-- **@samouraiwallet/bip47** - BIP47 payment code implementation
-- **@samouraiwallet/auth47** - Auth47 protocol utilities
+- **@dojo-tools/bip47** - BIP47 payment code implementation
+- **@dojo-tools/auth47** - Auth47 protocol utilities
 - **qrcode** - QR code generation
 
 ## Security Notes
@@ -171,6 +175,6 @@ MIT License - see LICENSE file for details
 ## Support
 
 For issues with:
-- **BIP47 Protocol**: Check [Samourai Wallet documentation](https://samouraiwallet.com/)
+- **BIP47 Protocol**: Check [Samourai Wallet documentation](https://freesamourai.com/)
 - **Railway Deployment**: See [Railway docs](https://docs.railway.app/)
 - **This Application**: Create an issue in the repository

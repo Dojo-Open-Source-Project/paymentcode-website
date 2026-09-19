@@ -2,13 +2,13 @@
 import 'dotenv/config';
 import express from 'express';
 import cors from 'cors';
+import rateLimit from 'express-rate-limit';
 import { MongoClient } from 'mongodb';
 import ecc from '@bitcoinerlab/secp256k1';
-import { BIP32Factory } from 'bip32';
-import { BIP47Factory } from '@samouraiwallet/bip47';
-import { networks } from '@samouraiwallet/bip47/utils';
-import { Auth47Verifier } from '@samouraiwallet/auth47';
-import { bitcoinMessageFactory } from '@samouraiwallet/bitcoinjs-message';
+import { BIP47Factory } from '@dojo-tools/bip47';
+import { networks } from '@dojo-tools/bip47/utils';
+import { Auth47Verifier } from '@dojo-tools/auth47';
+import { bitcoinMessageFactory } from '@dojo-tools/bitcoinjs-message';
 import QRCode from 'qrcode';
 import crypto from 'crypto';
 import path from 'path';
@@ -19,6 +19,22 @@ const __dirname = path.dirname(__filename);
 
 const app = express();
 const PORT = process.env.PORT || 3000;
+const PUBLIC_DIR = path.join(__dirname, 'public');
+
+// Request limits. Every one of these was previously unbounded, which let a
+// single request pin the CPU, bloat the database, or turn this server into an
+// amplifier against paynym.rs.
+const MAX_MESSAGE_LENGTH = 500;   // matches the textarea maxlength in guestbook.html
+const MAX_FOLLOWER_IDS = 50;      // per /api/paynym/followers request
+const FOLLOWER_CONCURRENCY = 5;   // simultaneous upstream fetches
+const MAX_QR_TEXT_LENGTH = 512;
+
+// Payment codes are base58; anything else must never reach an upstream URL.
+const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{1,120}$/;
+
+// Railway terminates TLS one hop in front of us, so req.ip needs the real
+// client address for rate limiting to key on anything meaningful.
+app.set('trust proxy', 1);
 
 // MongoDB connection
 const MONGODB_URI = process.env.MONGODB_URI || 'mongodb://localhost:27017/bip47-guestbook';
@@ -46,7 +62,54 @@ async function connectToDatabase() {
 // Initialize database connection
 connectToDatabase();
 
-app.use(cors());
+// Security headers. Every asset, font and avatar is served from this origin,
+// so the CSP can stay narrow.
+//
+// script-src is strict: all page scripts live in /js and all behaviour is wired
+// through data-action attributes, so there is no inline script to allow. That
+// is the control that actually stops injected markup from executing.
+//
+// style-src still needs 'unsafe-inline' because ~100 style="..." attributes
+// remain in the markup. Narrowing that means converting them to classes; it is
+// a much smaller risk than inline script, so it is left for a later pass.
+app.use((req, res, next) => {
+  res.setHeader('Content-Security-Policy', [
+    "default-src 'self'",
+    "script-src 'self'",
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data:",
+    "font-src 'self'",
+    "connect-src 'self'",
+    "form-action 'self'",
+    "frame-ancestors 'none'",
+    "base-uri 'none'",
+    "object-src 'none'"
+  ].join('; '));
+  res.setHeader('X-Content-Type-Options', 'nosniff');
+  res.setHeader('Referrer-Policy', 'no-referrer');
+  res.setHeader('X-Frame-Options', 'DENY');
+  res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=(), payment=()');
+  next();
+});
+
+// CORS is opened only on the read-only lookup endpoints that the docs page
+// advertises as a public API. Auth and guestbook writes stay same-origin so a
+// third-party page cannot drive them from a visitor's browser.
+const publicApiCors = cors({ origin: '*', methods: ['GET', 'POST'] });
+
+// Rate limits, tuned per endpoint cost. AGENTS.md calls for ~10/min against
+// the Paynym API; avatars get a higher ceiling because one profile view loads
+// many of them, and they are served from cache after the first hit.
+const rateLimitOpts = { standardHeaders: 'draft-7', legacyHeaders: false };
+const makeLimiter = (windowMs, limit, message) =>
+  rateLimit({ ...rateLimitOpts, windowMs, limit, message: { error: message } });
+
+const paynymLimiter = makeLimiter(60 * 1000, 10, 'Too many lookups. Please wait a minute.');
+const avatarLimiter = makeLimiter(60 * 1000, 120, 'Too many avatar requests.');
+const authLimiter = makeLimiter(15 * 60 * 1000, 30, 'Too many authentication attempts.');
+const qrLimiter = makeLimiter(60 * 1000, 30, 'Too many QR requests.');
+const submitLimiter = makeLimiter(60 * 60 * 1000, 5, 'Too many messages. Please try again later.');
+const labLimiter = makeLimiter(60 * 1000, 60, 'Too many requests.');
 
 // Advertise Tor hidden service to Tor Browser (Onion-Location standard)
 if (process.env.ONION_ADDRESS) {
@@ -56,11 +119,10 @@ if (process.env.ONION_ADDRESS) {
   });
 }
 
-app.use(express.json());
-app.use(express.static('public'));
+app.use(express.json({ limit: '32kb' }));
+app.use(express.static(PUBLIC_DIR, { maxAge: '1h' }));
 
-// Initialize BIP32 and BIP47 with ECC
-const bip32 = BIP32Factory(ecc);
+// Initialize BIP47 with ECC
 const bip47 = BIP47Factory(ecc);
 const bitcoinjsMessage = bitcoinMessageFactory(ecc);
 
@@ -75,7 +137,7 @@ const verifier = new Auth47Verifier(ecc, CALLBACK_URL);
 const pendingAuths = new Map();
 
 // Generate Auth47 URI
-app.get('/start-auth', async (req, res) => {
+app.get('/start-auth', authLimiter, async (req, res) => {
   try {
     const nonce = crypto.randomBytes(16).toString('hex');
     
@@ -119,7 +181,7 @@ app.get('/start-auth', async (req, res) => {
 });
 
 // Check auth status (polling endpoint)
-app.get('/check-auth/:nonce', (req, res) => {
+app.get('/check-auth/:nonce', authLimiter, (req, res) => {
   // Disable caching to ensure fresh auth status
   res.set('Cache-Control', 'no-store, no-cache, must-revalidate, private');
   res.set('Pragma', 'no-cache');
@@ -146,112 +208,127 @@ app.get('/check-auth/:nonce', (req, res) => {
 });
 
 // Verify Auth47 proof
-app.post('/verify', async (req, res) => {
+// --- Auth47 proof verification ----------------------------------------------
+
+// Compares two resource URLs. A trailing slash must not make a different site;
+// a different origin or path must.
+function sameResource(a, b) {
   try {
-    console.log('📥 Received verification request:', JSON.stringify(req.body, null, 2));
-    
-    const { auth47_response, challenge, nym, signature } = req.body;
-    
-    // Validate required fields
-    if (!challenge || !nym || !signature) {
-      console.error('❌ Missing required fields');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Missing required fields: challenge, nym, signature'
-      });
+    const norm = (value) => {
+      const url = new URL(value);
+      return url.origin.toLowerCase() + url.pathname.replace(/\/+$/, '') + url.search;
+    };
+    return norm(a) === norm(b);
+  } catch {
+    return false;
+  }
+}
+
+// Validates an Auth47 proof against a pending challenge.
+//
+// expectedResource is REQUIRED on purpose. A verifier that takes only the proof
+// answers "is this signed?" when the question is "is this signed FOR ME?".
+// Auth47Verifier.verifyProof() checks that the challenge's `r` parses as an
+// http(s) URL, but it has no way to know which URL is ours. Without the
+// comparison below, an attacker can request a live nonce from us, show a victim
+// the same challenge with `r` pointing at the attacker's site, and relay the
+// victim's genuine signature back here to open a session in the victim's name.
+// Nonce expiry, single use and signature validity do not prevent that; only
+// binding the proof to this site's resource does.
+function verifyAuth47Proof(proof, expectedResource) {
+  if (!expectedResource) {
+    throw new Error('verifyAuth47Proof requires an expected resource');
+  }
+
+  const { challenge, nym, signature } = proof ?? {};
+
+  if (!challenge || !nym || !signature) {
+    return { ok: false, error: 'Missing required fields: challenge, nym, signature' };
+  }
+
+  let challengeUrl;
+  try {
+    challengeUrl = new URL(challenge);
+  } catch {
+    return { ok: false, error: 'Invalid challenge format' };
+  }
+
+  const nonce = challengeUrl.hostname || challengeUrl.pathname.replace(/^\/\//, '');
+  const params = challengeUrl.searchParams;
+
+  const challengeExpiry = params.get('e');
+  if (!challengeExpiry) {
+    return { ok: false, error: 'Missing expiry parameter in challenge' };
+  }
+
+  const auth = pendingAuths.get(nonce);
+  if (!auth) {
+    return { ok: false, error: 'Invalid or expired nonce' };
+  }
+
+  const expiryTime = Number.parseInt(challengeExpiry, 10);
+  if (!Number.isFinite(expiryTime) || expiryTime <= Math.floor(Date.now() / 1000)) {
+    return { ok: false, error: 'Challenge has expired' };
+  }
+
+  if (auth.expiry !== expiryTime) {
+    return { ok: false, error: 'Expiry mismatch in challenge' };
+  }
+
+  if (auth.verified) {
+    return { ok: false, error: 'Nonce already used' };
+  }
+
+  // The resource binding. See the note above: this is the check that makes the
+  // wallet's "you are signing in to X" display mean anything server-side.
+  const resource = params.get('r');
+  if (!resource) {
+    return { ok: false, error: 'Missing resource parameter in challenge' };
+  }
+
+  if (!sameResource(resource, expectedResource)) {
+    console.error(`🚨 Resource mismatch: proof signed for "${resource}", expected "${expectedResource}"`);
+    return { ok: false, error: 'Proof was signed for a different site' };
+  }
+
+  const verifiedProof = verifier.verifyProof(proof, 'bitcoin');
+  if (verifiedProof.result !== 'ok') {
+    return { ok: false, error: verifiedProof.error };
+  }
+
+  return { ok: true, auth, nonce };
+}
+
+// Records a successful verification against its pending challenge.
+function markVerified(auth, proof) {
+  auth.verified = true;
+  auth.nym = proof.nym;
+  auth.paymentCode = proof.nym;
+  auth.challenge = proof.challenge;
+  auth.signature = proof.signature;
+}
+
+// Verify Auth47 proof
+app.post('/verify', authLimiter, async (req, res) => {
+  try {
+    console.log('📥 Received verification request');
+
+    const result = verifyAuth47Proof(req.body, CALLBACK_URL);
+
+    if (!result.ok) {
+      console.error(`❌ Verification failed: ${result.error}`);
+      return res.status(400).json({ result: 'error', error: result.error });
     }
-    
-    // Parse challenge URL to extract nonce and validate expiry
-    let nonce;
-    let challengeExpiry;
-    try {
-      const challengeUrl = new URL(challenge);
-      nonce = challengeUrl.hostname || challengeUrl.pathname.replace(/^\/\//, '');
-      
-      // Extract expiry from challenge parameters
-      const params = new URLSearchParams(challengeUrl.search);
-      challengeExpiry = params.get('e');
-      
-      if (!challengeExpiry) {
-        console.error('❌ Missing expiry parameter in challenge');
-        return res.status(400).json({
-          result: 'error',
-          error: 'Missing expiry parameter in challenge'
-        });
-      }
-    } catch (e) {
-      console.error('❌ Invalid challenge format:', challenge);
-      return res.status(400).json({
-        result: 'error',
-        error: 'Invalid challenge format'
-      });
-    }
-    
-    console.log(`🔍 Extracted nonce: ${nonce}, expiry: ${challengeExpiry}`);
-    
-    // Verify nonce exists
-    const auth = pendingAuths.get(nonce);
-    if (!auth) {
-      console.error('❌ Invalid or expired nonce');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Invalid or expired nonce'
-      });
-    }
-    
-    // Verify expiry matches and is not expired
-    const currentTime = Math.floor(Date.now() / 1000);
-    const expiryTime = parseInt(challengeExpiry, 10);
-    
-    if (expiryTime <= currentTime) {
-      console.error('❌ Challenge has expired');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Challenge has expired'
-      });
-    }
-    
-    if (auth.expiry !== expiryTime) {
-      console.error('❌ Expiry mismatch in challenge');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Expiry mismatch in challenge'
-      });
-    }
-    
-    if (auth.verified) {
-      console.error('❌ Nonce already used');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Nonce already used'
-      });
-    }
-    
-    // Verify signature using Auth47 library (Bitcoin Message Signing protocol)
-    const verifiedProof = verifier.verifyProof(req.body, 'bitcoin');
-    
-    if (verifiedProof.result === 'ok') {
-      // Mark as verified and store auth data
-      auth.verified = true;
-      auth.nym = nym;
-      auth.paymentCode = nym;
-      auth.challenge = challenge;
-      auth.signature = signature;
-      
-      console.log(`🎉 Authentication successful for ${nym}`);
-      
-      res.json({
-        result: 'ok',
-        nym,
-        payment_code: nym
-      });
-    } else {
-      console.error(`❌ Invalid signature: ${verifiedProof.error}`);
-      res.json({
-        result: 'error',
-        error: verifiedProof.error
-      });
-    }
+
+    markVerified(result.auth, req.body);
+    console.log(`🎉 Authentication successful for ${req.body.nym}`);
+
+    res.json({
+      result: 'ok',
+      nym: req.body.nym,
+      payment_code: req.body.nym
+    });
+
   } catch (error) {
     console.error('💥 Verification error:', error);
     res.status(400).json({
@@ -263,229 +340,265 @@ app.post('/verify', async (req, res) => {
 
 // Callback endpoint (displayed after wallet scans)
 app.get('/callback', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'callback.html'));
+  res.sendFile(path.join(PUBLIC_DIR, 'callback.html'));
 });
 
-// Handle Auth47 wallet callback (POST request from wallet)
-app.post('/callback', async (req, res) => {
+// Handle Auth47 wallet callback (POST request from wallet).
+// Runs the identical verification as /verify - the resource binding must not
+// depend on which entry point the wallet happens to use.
+app.post('/callback', authLimiter, async (req, res) => {
   try {
-    console.log('📥 Received Auth47 callback:', JSON.stringify(req.body, null, 2));
-    
-    const { auth47_response, challenge, nym, signature } = req.body;
-    
-    // Validate required fields
-    if (!challenge || !nym || !signature) {
-      console.error('❌ Missing required fields in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
+    console.log('📥 Received Auth47 callback');
+
+    const result = verifyAuth47Proof(req.body, CALLBACK_URL);
+
+    if (!result.ok) {
+      console.error(`❌ Callback verification failed: ${result.error}`);
+      return res.status(400).sendFile(path.join(PUBLIC_DIR, 'callback.html'));
     }
-    
-    // Parse challenge URL to extract nonce and validate expiry
-    let nonce;
-    let challengeExpiry;
-    try {
-      const challengeUrl = new URL(challenge);
-      nonce = challengeUrl.hostname || challengeUrl.pathname.replace(/^\/\//, '');
-      
-      // Extract expiry from challenge parameters
-      const params = new URLSearchParams(challengeUrl.search);
-      challengeExpiry = params.get('e');
-      
-      if (!challengeExpiry) {
-        console.error('❌ Missing expiry parameter in challenge');
-        return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-      }
-    } catch (e) {
-      console.error('❌ Invalid challenge format in callback:', challenge);
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    console.log(`🔍 Callback - Extracted nonce: ${nonce}, expiry: ${challengeExpiry}`);
-    
-    // Verify nonce exists
-    const auth = pendingAuths.get(nonce);
-    if (!auth) {
-      console.error('❌ Invalid or expired nonce in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    // Verify expiry matches and is not expired
-    const currentTime = Math.floor(Date.now() / 1000);
-    const expiryTime = parseInt(challengeExpiry, 10);
-    
-    if (expiryTime <= currentTime) {
-      console.error('❌ Challenge has expired in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    if (auth.expiry !== expiryTime) {
-      console.error('❌ Expiry mismatch in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    if (auth.verified) {
-      console.error('❌ Nonce already used in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    // Verify signature using Auth47 library (Bitcoin Message Signing protocol)
-    try {
-      const verifiedProof = verifier.verifyProof(req.body, 'bitcoin');
-      
-      if (verifiedProof.result === 'ok') {
-        // Mark as verified and store auth data
-        auth.verified = true;
-        auth.nym = nym;
-        auth.paymentCode = nym;
-        auth.challenge = challenge;
-        auth.signature = signature;
-        
-        console.log(`🎉 Authentication successful via callback for ${nym}`);
-        
-        // Redirect to callback page with nonce parameter so it can poll auth status
-        return res.redirect(`/callback?nonce=${nonce}`);
-      } else {
-        console.log(`❌ Callback verification failed: ${verifiedProof.error}`);
-        // Redirect to callback page with nonce for error display
-        return res.redirect(`/callback?nonce=${nonce}`);
-      }
-    } catch (verifyError) {
-      console.log('❌ Callback verification error:', verifyError.message);
-      // Still serve the callback page
-      res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
+
+    markVerified(result.auth, req.body);
+    console.log(`🎉 Authentication successful via callback for ${req.body.nym}`);
+
+    // Redirect to the callback page with the nonce so it can poll auth status
+    return res.redirect(`/callback?nonce=${result.nonce}`);
+
   } catch (error) {
     console.error('💥 Callback error:', error);
-    // Still serve the callback page even on error
-    res.sendFile(path.join(__dirname, 'public', 'callback.html'));
+    res.status(400).sendFile(path.join(PUBLIC_DIR, 'callback.html'));
   }
 });
 
+
 // Health check
 app.get('/health', (req, res) => {
-  res.json({ 
-    status: 'ok', 
-    pendingAuths: pendingAuths.size,
-    verified: Array.from(pendingAuths.values()).filter(a => a.verified).length
+  res.json({
+    status: 'ok',
+    database: db ? 'connected' : 'unavailable'
   });
 });
 
+// --- Paynym upstream helpers ------------------------------------------------
+
+// Overridable so the proxy can be exercised against a stub in tests.
+const PAYNYM_ORIGIN = process.env.PAYNYM_ORIGIN || 'https://paynym.rs';
+const PAYNYM_API = `${PAYNYM_ORIGIN}/api/v1/nym/`;
+const UPSTREAM_TIMEOUT_MS = 8000;
+const NYM_CACHE_TTL = 5 * 60 * 1000;
+const AVATAR_CACHE_TTL = 60 * 60 * 1000;
+
+const nymCache = new Map();
+const avatarCache = new Map();
+
+function cacheGet(cache, key, ttl) {
+  const hit = cache.get(key);
+  if (!hit) return null;
+  if (Date.now() - hit.timestamp > ttl) {
+    cache.delete(key);
+    return null;
+  }
+  return hit.value;
+}
+
+function cacheSet(cache, key, value, maxEntries = 500) {
+  // Oldest-first eviction keeps these caches from growing without bound.
+  if (cache.size >= maxEntries) cache.delete(cache.keys().next().value);
+  cache.set(key, { value, timestamp: Date.now() });
+}
+
+function primaryCodeOf(data) {
+  return data?.codes?.length ? data.codes[0].code : null;
+}
+
+// Avatars are proxied through this server rather than linked straight to
+// paynym.rs, so a visitor's browser never contacts a third party.
+function avatarPath(code) {
+  return code ? `/api/paynym/avatar/${code}` : null;
+}
+
+async function fetchNym(nym) {
+  const cached = cacheGet(nymCache, nym, NYM_CACHE_TTL);
+  if (cached) return cached;
+
+  const response = await fetch(PAYNYM_API, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ nym }),
+    signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
+  });
+
+  const text = await response.text();
+  if (!response.ok || !text || text.trim() === '') return null;
+
+  const data = JSON.parse(text);
+  cacheSet(nymCache, nym, data);
+  return data;
+}
+
+// Same as fetchNym, but swallows failures for the call sites where a missing
+// Paynym is not an error worth failing the whole request over.
+async function fetchNymSafe(nym) {
+  try {
+    return await fetchNym(nym);
+  } catch (error) {
+    console.error(`❌ Paynym fetch failed for ${nym}:`, error.message);
+    return null;
+  }
+}
+
+// Runs fn over items with a ceiling on simultaneous work. Promise.all over an
+// unbounded array previously let one request fan out arbitrarily wide upstream.
+async function mapWithConcurrency(items, limit, fn) {
+  const results = new Array(items.length);
+  let next = 0;
+
+  const worker = async () => {
+    while (next < items.length) {
+      const i = next++;
+      results[i] = await fn(items[i], i);
+    }
+  };
+
+  await Promise.all(Array.from({ length: Math.min(limit, items.length) }, worker));
+  return results;
+}
+
 // Paynym API proxy endpoint
-app.post('/api/paynym/lookup', async (req, res) => {
+app.post('/api/paynym/lookup', paynymLimiter, publicApiCors, async (req, res) => {
   try {
     const { nym } = req.body;
-    
-    if (!nym) {
+
+    if (!nym || typeof nym !== 'string') {
       return res.status(400).json({ error: 'Missing nym parameter' });
     }
-    
-    console.log(`🔍 Looking up Paynym: ${nym}`);
-    
-    // Call paynym.rs API
-    const response = await fetch('https://paynym.rs/api/v1/nym/', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json'
-      },
-      body: JSON.stringify({ nym })
-    });
-    
-    // Check if response body is empty
-    const text = await response.text();
-    if (!text || text.trim() === '') {
-      console.error(`❌ Paynym lookup failed: Empty response from API`);
-      return res.status(404).json({ 
-        error: 'Paynym not found. Please check the nymID or nymName and try again.' 
-      });
+
+    if (nym.length > 120) {
+      return res.status(400).json({ error: 'nym parameter is too long' });
     }
-    
-    // Parse JSON
+
+    const cached = cacheGet(nymCache, nym, NYM_CACHE_TTL);
+    if (cached) {
+      console.log(`✅ Paynym cache hit: ${cached.nymName}`);
+      return res.json(cached);
+    }
+
+    console.log(`🔍 Looking up Paynym: ${nym}`);
+
     let data;
     try {
-      data = JSON.parse(text);
+      data = await fetchNym(nym);
     } catch (parseError) {
-      console.error(`❌ Failed to parse API response:`, parseError.message);
-      return res.status(500).json({ 
-        error: 'Invalid response from Paynym API' 
+      console.error(`❌ Failed to read API response:`, parseError.message);
+      return res.status(502).json({ error: 'Invalid response from Paynym API' });
+    }
+
+    if (!data) {
+      console.error(`❌ Paynym lookup failed: no result from API`);
+      return res.status(404).json({
+        error: 'Paynym not found. Please check the nymID or nymName and try again.'
       });
     }
-    
-    if (!response.ok) {
-      console.error(`❌ Paynym lookup failed: ${data.error || response.statusText}`);
-      return res.status(response.status).json({ 
-        error: data.error || 'Paynym not found' 
-      });
-    }
-    
+
     console.log(`✅ Paynym found: ${data.nymName}`);
     res.json(data);
-    
+
   } catch (error) {
     console.error('💥 Paynym lookup error:', error);
-    res.status(500).json({ 
-      error: 'Failed to lookup Paynym' 
+    res.status(500).json({ error: 'Failed to lookup Paynym' });
+  }
+});
+
+// Avatar proxy. Keeps visitor IPs off paynym.rs and lets the strict img-src
+// CSP stay at 'self'. The payment code is validated before it reaches a URL.
+app.get('/api/paynym/avatar/:code', avatarLimiter, async (req, res) => {
+  try {
+    const { code } = req.params;
+
+    if (!BASE58_RE.test(code)) {
+      return res.status(400).json({ error: 'Invalid payment code' });
+    }
+
+    const cached = cacheGet(avatarCache, code, AVATAR_CACHE_TTL);
+    if (cached) {
+      res.setHeader('Content-Type', cached.contentType);
+      res.setHeader('Cache-Control', 'public, max-age=86400');
+      return res.send(cached.body);
+    }
+
+    const upstream = await fetch(`${PAYNYM_ORIGIN}/${code}/avatar`, {
+      signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS)
     });
+
+    if (!upstream.ok) {
+      return res.status(404).json({ error: 'Avatar not found' });
+    }
+
+    const contentType = upstream.headers.get('content-type') || '';
+    if (!contentType.startsWith('image/')) {
+      console.error(`❌ Unexpected avatar content-type: ${contentType}`);
+      return res.status(502).json({ error: 'Unexpected avatar response' });
+    }
+
+    const body = Buffer.from(await upstream.arrayBuffer());
+    cacheSet(avatarCache, code, { body, contentType }, 200);
+
+    res.setHeader('Content-Type', contentType);
+    res.setHeader('Cache-Control', 'public, max-age=86400');
+    res.send(body);
+
+  } catch (error) {
+    console.error('💥 Avatar proxy error:', error.message);
+    res.status(502).json({ error: 'Failed to fetch avatar' });
   }
 });
 
 // Batch Paynym details endpoint for followers
-app.post('/api/paynym/followers', async (req, res) => {
+app.post('/api/paynym/followers', paynymLimiter, publicApiCors, async (req, res) => {
   try {
     const { nymIds } = req.body;
-    
+
     if (!nymIds || !Array.isArray(nymIds)) {
       return res.status(400).json({ error: 'Missing or invalid nymIds parameter' });
     }
-    
+
     if (nymIds.length === 0) {
       return res.json([]);
     }
-    
-    console.log(`🔍 Fetching details for ${nymIds.length} followers`);
-    
-    // Fetch details for each follower in parallel
-    const followerPromises = nymIds.map(async (nymId) => {
-      try {
-        const response = await fetch('https://paynym.rs/api/v1/nym/', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json'
-          },
-          body: JSON.stringify({ nym: nymId })
-        });
-        
-        if (!response.ok) {
-          return { nymId, error: 'Not found' };
-        }
-        
-        const data = await response.json();
-        
-        // Get primary payment code for avatar
-        const primaryCode = data.codes && data.codes.length > 0 ? data.codes[0].code : '';
-        
-        return {
-          nymId: data.nymID,
-          nymName: data.nymName || 'Unknown',
-          avatarUrl: primaryCode ? `https://paynym.rs/${primaryCode}/avatar` : null,
-          primaryCode: primaryCode
-        };
-      } catch (error) {
-        console.error(`❌ Error fetching follower ${nymId}:`, error.message);
-        return { nymId, error: 'Failed to fetch' };
-      }
+
+    // Cap the batch and the concurrency. Without both, one request could fan
+    // out arbitrarily many simultaneous fetches at paynym.rs.
+    const requested = nymIds
+      .filter(id => typeof id === 'string' && id.length <= 120)
+      .slice(0, MAX_FOLLOWER_IDS);
+
+    if (requested.length < nymIds.length) {
+      console.log(`⚠️  Trimmed follower batch from ${nymIds.length} to ${requested.length}`);
+    }
+
+    console.log(`🔍 Fetching details for ${requested.length} followers`);
+
+    const followers = await mapWithConcurrency(requested, FOLLOWER_CONCURRENCY, async (nymId) => {
+      const data = await fetchNymSafe(nymId);
+      if (!data) return null;
+
+      const primaryCode = primaryCodeOf(data);
+      return {
+        nymId: data.nymID,
+        nymName: data.nymName || 'Unknown',
+        avatarUrl: avatarPath(primaryCode),
+        primaryCode: primaryCode || ''
+      };
     });
 
-    const followers = await Promise.all(followerPromises);
-    
-    // Filter out failed fetches
-    const validFollowers = followers.filter(f => !f.error);
-    
+    const validFollowers = followers.filter(Boolean);
+
     console.log(`✅ Successfully fetched ${validFollowers.length} follower details`);
     res.json(validFollowers);
-    
+
   } catch (error) {
     console.error('💥 Batch followers error:', error);
-    res.status(500).json({ 
-      error: 'Failed to fetch follower details' 
+    res.status(500).json({
+      error: 'Failed to fetch follower details'
     });
   }
 });
@@ -508,12 +621,16 @@ app.get('/', (req, res) => {
 // BIP47 LAB API endpoints - Client-side payment code tools
 
 // Payment Code Validator
-app.post('/api/bip47/validate', (req, res) => {
+app.post('/api/bip47/validate', labLimiter, publicApiCors, (req, res) => {
   try {
     const { paymentCode } = req.body;
 
-    if (!paymentCode) {
+    if (!paymentCode || typeof paymentCode !== 'string') {
       return res.status(400).json({ error: 'Payment code required' });
+    }
+
+    if (paymentCode.length > 200) {
+      return res.status(400).json({ error: 'Payment code is too long' });
     }
 
     const checks = {
@@ -553,7 +670,7 @@ app.post('/api/bip47/validate', (req, res) => {
 });
 
 // BIP47 Message Verifier - Verify message signed with notification address
-app.post('/api/bip47/verify-message', async (req, res) => {
+app.post('/api/bip47/verify-message', labLimiter, publicApiCors, async (req, res) => {
   try {
     const { paymentCode, message, signature } = req.body;
 
@@ -600,29 +717,9 @@ app.post('/api/bip47/verify-message', async (req, res) => {
     }
 
     // Try to fetch Paynym details for additional info
-    let nymName = null;
-    let avatarUrl = null;
-    try {
-      const paynymResponse = await fetch('https://paynym.rs/api/v1/nym/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nym: paymentCode })
-      });
-
-      if (paynymResponse.ok) {
-        const paynymData = await paynymResponse.json();
-        nymName = paynymData.nymName || null;
-        const primaryCode = paynymData.codes && paynymData.codes.length > 0 
-          ? paynymData.codes[0].code 
-          : null;
-        if (primaryCode) {
-          avatarUrl = `https://paynym.rs/${primaryCode}/avatar`;
-        }
-      }
-    } catch (fetchError) {
-      // Continue without Paynym details
-      console.log('⚠️  Could not fetch Paynym details:', fetchError.message);
-    }
+    const paynymData = await fetchNymSafe(paymentCode);
+    const nymName = paynymData?.nymName || null;
+    const avatarUrl = avatarPath(primaryCodeOf(paynymData));
 
     console.log(`${isValid ? '✅' : '❌'} Message verification ${isValid ? 'successful' : 'failed'}`);
 
@@ -664,12 +761,19 @@ app.get('/about', (req, res) => {
 });
 
 // QR Code generation endpoint for payment codes
-app.get('/api/qr', async (req, res) => {
+app.get('/api/qr', qrLimiter, async (req, res) => {
   try {
     const { text } = req.query;
-    
-    if (!text) {
+
+    if (!text || typeof text !== 'string') {
       return res.status(400).json({ error: 'Missing text parameter' });
+    }
+
+    // Unbounded input here was a cheap way to make the server do expensive work.
+    if (text.length > MAX_QR_TEXT_LENGTH) {
+      return res.status(400).json({
+        error: `Text too long (max ${MAX_QR_TEXT_LENGTH} characters)`
+      });
     }
     
     const qr = await QRCode.toDataURL(text);
@@ -696,8 +800,18 @@ app.get('/api/guestbook/messages', async (req, res) => {
       .sort({ createdAt: -1 })
       .toArray();
 
-    console.log(`✅ Retrieved ${messages.length} messages`);
-    res.json(messages);
+    // Rows written before the avatar proxy existed hold absolute paynym.rs
+    // URLs. Rewrite them on read so old messages keep their avatars without
+    // needing a migration, and without the browser hitting a third party.
+    const normalized = messages.map(msg => {
+      const legacy = typeof msg.nymAvatar === 'string'
+        ? msg.nymAvatar.match(/^https?:\/\/paynym\.rs\/([1-9A-HJ-NP-Za-km-z]+)\/avatar$/)
+        : null;
+      return legacy ? { ...msg, nymAvatar: avatarPath(legacy[1]) } : msg;
+    });
+
+    console.log(`✅ Retrieved ${normalized.length} messages`);
+    res.json(normalized);
 
   } catch (error) {
     console.error('💥 Error fetching messages:', error);
@@ -706,13 +820,26 @@ app.get('/api/guestbook/messages', async (req, res) => {
 });
 
 // POST /api/guestbook/submit - Submit new message with Auth47
-app.post('/api/guestbook/submit', async (req, res) => {
+app.post('/api/guestbook/submit', submitLimiter, async (req, res) => {
   try {
     const { nonce, message, challenge, signature, nym } = req.body;
 
     if (!nonce || !message || !challenge || !signature || !nym) {
       return res.status(400).json({ 
         error: 'Missing required fields: nonce, message, challenge, signature, nym' 
+      });
+    }
+
+    // The textarea enforces this client-side; the server has to as well, or
+    // anyone posting directly to the API can store arbitrarily large documents.
+    if (typeof message !== 'string' || message.trim().length === 0) {
+      return res.status(400).json({ error: 'Message must be a non-empty string' });
+    }
+
+    const trimmedMessage = message.trim();
+    if (trimmedMessage.length > MAX_MESSAGE_LENGTH) {
+      return res.status(400).json({
+        error: `Message too long (max ${MAX_MESSAGE_LENGTH} characters)`
       });
     }
 
@@ -733,33 +860,12 @@ app.post('/api/guestbook/submit', async (req, res) => {
     console.log(`📝 Submitting message from ${nym}`);
 
     // Fetch Paynym details including avatar
-    let nymName = nym;
-    let nymAvatar = null;
-    try {
-      const paynymResponse = await fetch('https://paynym.rs/api/v1/nym/', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ nym })
-      });
+    const paynymData = await fetchNymSafe(nym);
+    const nymName = paynymData?.nymName || nym;
+    const nymAvatar = avatarPath(primaryCodeOf(paynymData));
 
-      if (paynymResponse.ok) {
-        const paynymData = await paynymResponse.json();
-        nymName = paynymData.nymName || nym;
-        
-        // Get avatar URL from primary payment code
-        const primaryCode = paynymData.codes && paynymData.codes.length > 0 
-          ? paynymData.codes[0].code 
-          : null;
-        
-        if (primaryCode) {
-          nymAvatar = `https://paynym.rs/${primaryCode}/avatar`;
-        }
-        
-        console.log(`✅ Fetched Paynym: ${nymName}, avatar: ${nymAvatar ? 'yes' : 'no'}`);
-      }
-    } catch (fetchError) {
-      console.error('⚠️  Failed to fetch Paynym details:', fetchError.message);
-      // Continue without avatar - still allow message submission
+    if (paynymData) {
+      console.log(`✅ Fetched Paynym: ${nymName}, avatar: ${nymAvatar ? 'yes' : 'no'}`);
     }
 
     // Store message in database
@@ -767,7 +873,7 @@ app.post('/api/guestbook/submit', async (req, res) => {
       paymentCode: nym,
       nymName,
       nymAvatar,
-      message,
+      message: trimmedMessage,
       signature,
       verified: true,
       createdAt: new Date(),
@@ -791,6 +897,14 @@ app.post('/api/guestbook/submit', async (req, res) => {
     console.error('💥 Error submitting message:', error);
     res.status(500).json({ error: 'Failed to submit message' });
   }
+});
+
+// Unknown routes. Without this, Express serves its own unstyled HTML page.
+app.use((req, res) => {
+  if (req.path.startsWith('/api/')) {
+    return res.status(404).json({ error: 'Not found' });
+  }
+  res.status(404).sendFile(path.join(PUBLIC_DIR, '404.html'));
 });
 
 app.listen(PORT, () => {

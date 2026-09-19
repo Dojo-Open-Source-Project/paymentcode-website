@@ -3,13 +3,13 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <meta name="description" content="Leave a signed message for the cypherpunk community. Authenticated with Bitcoin.">
+  <meta name="description" content="Leave a message for the cypherpunk community. Your identity is authenticated with your Bitcoin wallet.">
 
   <!-- Open Graph -->
   <meta property="og:type" content="website">
   <meta property="og:site_name" content="BIP47 & PayNyms">
   <meta property="og:title" content="Guestbook — BIP47 & PayNyms">
-  <meta property="og:description" content="Leave a signed message for the cypherpunk community. Authenticated with Bitcoin.">
+  <meta property="og:description" content="Leave a message for the cypherpunk community. Your identity is authenticated with your Bitcoin wallet.">
   <meta property="og:url" content="https://paymentcode.io/guestbook">
   <meta property="og:image" content="https://paymentcode.io/logos/favicons/android-chrome-512x512.png">
   <meta property="og:image:width" content="512">
@@ -18,369 +18,48 @@
   <!-- Twitter Card -->
   <meta name="twitter:card" content="summary">
   <meta name="twitter:title" content="Guestbook — BIP47 & PayNyms">
-  <meta name="twitter:description" content="Leave a signed message for the cypherpunk community. Authenticated with Bitcoin.">
+  <meta name="twitter:description" content="Leave a message for the cypherpunk community. Your identity is authenticated with your Bitcoin wallet.">
   <meta name="twitter:image" content="https://paymentcode.io/logos/favicons/android-chrome-512x512.png">
 
+  <link rel="canonical" href="https://paymentcode.io/guestbook">
   <title>Guestbook — BIP47 & PayNyms</title>
   <link rel="icon" type="image/x-icon" href="/logos/favicons/favicon.ico">
   <link rel="icon" type="image/png" sizes="32x32" href="/logos/favicons/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/logos/favicons/favicon-16x16.png">
   <link rel="apple-touch-icon" sizes="180x180" href="/logos/favicons/apple-touch-icon.png">
   <link rel="manifest" href="/logos/favicons/site.webmanifest">
-  <link rel="stylesheet" href="styles.css">
-    <style>
-        /* Page-specific styles for guestbook.html */
-        .nav-bar {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: var(--space-xl);
-            padding-bottom: var(--space-md);
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .back-link {
-            color: var(--text-secondary);
-            text-decoration: none;
-            font-size: 0.9rem;
-            transition: color var(--transition-fast);
-        }
-
-        .back-link:hover { color: var(--accent-primary); }
-
-        .subtitle {
-            color: var(--text-muted);
-            font-size: 0.85rem;
-            margin-bottom: var(--space-xl);
-        }
-
-        /* Sign Button */
-        .sign-section {
-            text-align: center;
-            margin-bottom: var(--space-xl);
-        }
-
-        .sign-btn {
-            background: var(--bg-elevated);
-            border: 2px solid var(--accent-primary);
-            color: var(--accent-primary);
-            padding: var(--space-md) var(--space-xl);
-            font-family: var(--font-ui);
-            font-size: 1rem;
-            cursor: pointer;
-            border-radius: var(--radius-md);
-            transition: all var(--transition-normal);
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-            font-weight: 600;
-        }
-
-        .sign-btn:hover:not(:disabled) {
-            background: var(--bg-elevated);
-            box-shadow: 0 0 20px var(--glow-medium);
-            transform: translateY(-2px);
-        }
-
-        .sign-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        /* Messages List */
-        .messages-list {
-            display: flex;
-            flex-direction: column;
-            gap: var(--space-lg);
-        }
-
-        .message-card {
-            background: var(--bg-elevated);
-            border: 1px solid var(--border-subtle);
-            border-radius: var(--radius-md);
-            padding: var(--space-lg);
-            animation: fadeIn 0.5s ease-in;
-        }
-
-        @keyframes fadeIn {
-            from { opacity: 0; transform: translateY(10px); }
-            to { opacity: 1; transform: translateY(0); }
-        }
-
-        .message-header {
-            display: flex;
-            align-items: center;
-            gap: var(--space-md);
-            margin-bottom: var(--space-md);
-            padding-bottom: var(--space-md);
-            border-bottom: 1px solid var(--border-subtle);
-        }
-
-        .avatar {
-            width: 50px;
-            height: 50px;
-            border-radius: var(--radius-md);
-            border: 2px solid var(--accent-primary);
-            object-fit: cover;
-            background: var(--bg-primary);
-        }
-
-        .avatar-placeholder {
-            width: 50px;
-            height: 50px;
-            border-radius: var(--radius-md);
-            border: 2px solid var(--accent-primary);
-            background: var(--bg-primary);
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-size: 1.5rem;
-        }
-
-        .message-meta {
-            flex: 1;
-        }
-
-        .nym-name {
-            font-size: 1rem;
-            font-weight: 600;
-            color: var(--accent-primary);
-            margin-bottom: var(--space-xs);
-            word-break: break-word;
-            min-width: 0;
-        }
-
-        .timestamp {
-            font-size: 0.75rem;
-            color: var(--text-muted);
-        }
-
-        .message-body {
-            font-size: 0.9rem;
-            line-height: 1.6;
-            color: var(--text-primary);
-            word-wrap: break-word;
-        }
-
-        /* Auth Modal */
-        .modal {
-            display: none;
-            position: fixed;
-            top: 0;
-            left: 0;
-            width: 100%;
-            height: 100%;
-            background: rgba(0, 0, 0, 0.9);
-            z-index: 1000;
-            align-items: center;
-            justify-content: center;
-        }
-
-        .modal.active { display: flex; }
-
-        .modal-content {
-            background: var(--bg-surface);
-            border: 2px solid var(--accent-primary);
-            border-radius: var(--radius-lg);
-            padding: var(--space-xl);
-            max-width: 500px;
-            width: 90%;
-            max-height: 90vh;
-            overflow-y: auto;
-        }
-
-        .modal-header {
-            display: flex;
-            justify-content: space-between;
-            align-items: center;
-            margin-bottom: var(--space-lg);
-            padding-bottom: var(--space-md);
-            border-bottom: 1px solid var(--border-default);
-        }
-
-        .modal-title {
-            font-size: 1.2rem;
-            color: var(--accent-primary);
-        }
-
-        .close-btn {
-            background: none;
-            border: none;
-            color: var(--accent-primary);
-            font-size: 1.5rem;
-            cursor: pointer;
-            padding: 0;
-            width: 30px;
-            height: 30px;
-        }
-
-        .close-btn:hover { opacity: 0.7; }
-
-        .qr-container {
-            text-align: center;
-            margin: var(--space-lg) auto;
-            display: flex;
-            justify-content: center;
-            align-items: center;
-        }
-
-        .qr-code {
-            max-width: 100%;
-            border: 2px solid var(--accent-primary);
-            border-radius: var(--radius-md);
-            padding: var(--space-md);
-            background: white;
-            display: block;
-            cursor: pointer;
-            transition: transform 0.2s, box-shadow 0.2s;
-        }
-
-        .qr-code:hover {
-            transform: scale(1.02);
-            box-shadow: 0 0 15px var(--glow-medium);
-        }
-
-        .qr-tap-hint {
-            text-align: center;
-            color: var(--text-muted);
-            font-size: 0.75rem;
-            margin-top: var(--space-sm);
-        }
-
-        .auth-status {
-            text-align: center;
-            margin: var(--space-md) 0;
-            padding: var(--space-md);
-            background: var(--bg-primary);
-            border-radius: var(--radius-md);
-            font-size: 0.9rem;
-        }
-
-        .auth-status.pending {
-            color: var(--accent-warning);
-            border-left: 3px solid var(--accent-warning);
-        }
-
-        .auth-status.verified {
-            color: var(--accent-primary);
-            border-left: 3px solid var(--accent-primary);
-        }
-
-        .auth-status.error {
-            color: var(--accent-error);
-            border-left: 3px solid var(--accent-error);
-        }
-
-        .message-input {
-            margin: var(--space-md) 0;
-        }
-
-        textarea {
-            width: 100%;
-            background: var(--bg-primary);
-            border: 1px solid var(--border-default);
-            border-radius: var(--radius-md);
-            padding: var(--space-md);
-            color: var(--text-primary);
-            font-family: var(--font-ui);
-            font-size: 0.9rem;
-            resize: vertical;
-            min-height: 100px;
-        }
-
-        textarea:focus {
-            outline: none;
-            box-shadow: 0 0 10px var(--glow-subtle);
-        }
-
-        .submit-btn {
-            width: 100%;
-            background: var(--bg-elevated);
-            border: 1px solid var(--accent-primary);
-            color: var(--accent-primary);
-            padding: var(--space-md);
-            font-family: var(--font-ui);
-            font-size: 0.9rem;
-            cursor: pointer;
-            border-radius: var(--radius-md);
-            transition: all var(--transition-normal);
-            text-transform: uppercase;
-            letter-spacing: 0.1em;
-        }
-
-        .submit-btn:hover:not(:disabled) {
-            background: var(--bg-elevated);
-        }
-
-        .submit-btn:disabled {
-            opacity: 0.5;
-            cursor: not-allowed;
-        }
-
-        /* Loading State */
-        .loading {
-            display: inline-block;
-            width: 20px;
-            height: 20px;
-            border: 3px solid rgba(74, 222, 128, 0.3);
-            border-radius: 50%;
-            border-top-color: var(--accent-primary);
-            animation: spin 1s ease-in-out infinite;
-            margin-right: var(--space-sm);
-        }
-
-        @keyframes spin {
-            to { transform: rotate(360deg); }
-        }
-
-        /* Empty State */
-        .empty-state {
-            text-align: center;
-            padding: var(--space-xl);
-            color: var(--text-muted);
-        }
-
-        .empty-state-icon {
-            font-size: 3rem;
-            margin-bottom: var(--space-md);
-            opacity: 0.5;
-        }
-
-        /* Error Message */
-        .error-message {
-            color: var(--accent-error);
-            font-size: 0.85rem;
-            margin-top: var(--space-sm);
-            padding: var(--space-sm);
-            border-left: 3px solid var(--accent-error);
-            background: rgba(239, 68, 68, 0.05);
-        }
-    </style>
+  <link rel="stylesheet" href="/styles.css">
+    <link rel="stylesheet" href="/css/guestbook.css">
 <body>
+  <a class="skip-link" href="#main">Skip to content</a>
     <div class="container">
         <div class="nav-bar">
             <a href="/" class="back-link">← Back to Home</a>
             <span style="color: var(--text-muted); font-size: 0.8rem;">[GUESTBOOK]</span>
         </div>
 
-        <div class="main-content">
+        <main class="main-content" id="main">
             <h1>> GUESTBOOK</h1>
-                <div class="subtitle">Cryptographically verified messages from the BIP47 community</div>
+                <div class="subtitle">Messages from BIP47 community members, authenticated by wallet</div>
 
                 <div class="sign-section">
-                    <button id="sign-btn" class="sign-btn" onclick="openAuthModal()">
+                    <button id="sign-btn" class="sign-btn btn-block" data-action="open-auth">
                         ✍️ SIGN GUESTBOOK
                     </button>
+                    <p class="auth-scope-note">
+                        Auth47 proves the author controlled their payment code when they
+                        posted. The message text itself is not separately signed.
+                    </p>
                 </div>
 
                 <div id="messages-container" class="messages-list" style="margin-bottom: var(--space-xl);">
                     <div class="empty-state">
-                        <div class="empty-state-icon">📝</div>
+                        <div class="empty-state-icon" aria-hidden="true">📝</div>
                         <div>Loading messages...</div>
                     </div>
                 </div>
-            </div>
+            </main>
         </div>
-    </div>
     
     <div class="footer">
         <div class="footer-text">Built with <span class="footer-heart">♥</span> for the cypherpunk community</div>
@@ -392,7 +71,7 @@
         <div class="modal-content">
             <div class="modal-header">
                 <h2 class="modal-title">Authenticate with BIP47</h2>
-                <button class="close-btn" onclick="closeAuthModal()">×</button>
+                <button class="close-btn" data-action="close-auth" aria-label="Close">×</button>
             </div>
 
             <div id="auth-step-1">
@@ -429,7 +108,7 @@
                     </div>
                 </div>
 
-                <button id="submit-btn" class="submit-btn" onclick="submitMessage()">
+                <button id="submit-btn" class="submit-btn" data-action="submit-message">
                     SUBMIT MESSAGE
                 </button>
 
@@ -438,247 +117,7 @@
         </div>
     </div>
 
-    <script>
-        let currentNonce = null;
-        let currentAuth = null;
-        let pollInterval = null;
-
-        // Load messages on page load
-        window.addEventListener('DOMContentLoaded', () => {
-            loadMessages();
-        });
-
-        // Load all messages
-        async function loadMessages() {
-            try {
-                console.log('🔍 Loading messages...');
-                const response = await fetch('/api/guestbook/messages');
-                const messages = await response.json();
-
-                const container = document.getElementById('messages-container');
-
-                if (messages.length === 0) {
-                    container.innerHTML = `
-                        <div class="empty-state">
-                            <div class="empty-state-icon">📝</div>
-                            <div>No messages yet. Be the first to sign!</div>
-                        </div>
-                    `;
-                    return;
-                }
-
-                container.innerHTML = messages.map(msg => `
-                    <div class="message-card">
-                        <div class="message-header">
-                            ${msg.nymAvatar 
-                                ? `<img src="${msg.nymAvatar}" class="avatar" alt="${msg.nymName}" onerror="this.style.display='none'; this.nextElementSibling.style.display='flex';">
-                                   <div class="avatar-placeholder" style="display: none;">?</div>`
-                                : `<div class="avatar-placeholder">?</div>`
-                            }
-                            <div class="message-meta">
-                                <div class="nym-name">${escapeHtml(msg.nymName)}</div>
-                                <div class="timestamp">${formatDate(msg.createdAt)}</div>
-                            </div>
-                        </div>
-                        <div class="message-body">${escapeHtml(msg.message)}</div>
-                    </div>
-                `).join('');
-
-                console.log(`✅ Loaded ${messages.length} messages`);
-            } catch (error) {
-                console.error('💥 Error loading messages:', error);
-                document.getElementById('messages-container').innerHTML = `
-                    <div class="empty-state">
-                        <div class="empty-state-icon">❌</div>
-                        <div>Failed to load messages. Please try again.</div>
-                    </div>
-                `;
-            }
-        }
-
-        // Open auth modal
-        async function openAuthModal() {
-            document.getElementById('auth-modal').classList.add('active');
-            document.getElementById('auth-step-1').style.display = 'block';
-            document.getElementById('auth-step-2').style.display = 'none';
-            document.getElementById('qr-loading').style.display = 'block';
-            document.getElementById('qr-code').style.display = 'none';
-            document.getElementById('qr-tap-hint').style.display = 'none';
-            document.getElementById('auth-status').className = 'auth-status pending';
-            document.getElementById('auth-status').textContent = 'Waiting for wallet signature...';
-
-            try {
-                console.log('🔍 Starting authentication...');
-                const response = await fetch('/start-auth');
-                const data = await response.json();
-
-                currentNonce = data.nonce;
-                console.log(`✅ Generated nonce: ${currentNonce}`);
-
-                const qrCode = document.getElementById('qr-code');
-                qrCode.src = data.qr;
-                qrCode.style.display = 'block';
-                qrCode.onclick = () => {
-                    // Open auth47:// URI directly on mobile
-                    window.location.href = data.uri;
-                };
-                document.getElementById('qr-loading').style.display = 'none';
-                document.getElementById('qr-tap-hint').style.display = 'block';
-
-                // Start polling for auth status
-                startPolling(data.nonce);
-            } catch (error) {
-                console.error('💥 Error starting auth:', error);
-                document.getElementById('auth-status').className = 'auth-status error';
-                document.getElementById('auth-status').textContent = 'Failed to generate QR code';
-            }
-        }
-
-        // Start polling for auth status
-        function startPolling(nonce) {
-            pollInterval = setInterval(async () => {
-                try {
-                    const response = await fetch(`/check-auth/${nonce}`);
-                    const data = await response.json();
-
-                    if (data.status === 'verified') {
-                        clearInterval(pollInterval);
-                        currentAuth = data;
-                        console.log(`✅ Auth verified for ${data.nym}`);
-                        
-                        document.getElementById('auth-status').className = 'auth-status verified';
-                        document.getElementById('auth-status').textContent = '✅ Authentication successful!';
-                        
-                        // Show step 2
-                        setTimeout(() => {
-                        document.getElementById('auth-step-1').style.display = 'none';
-                        document.getElementById('auth-step-2').style.display = 'block';
-                        
-                        // Show nymName instead of full payment code
-                        const displayNym = data.nym.length > 30 
-                            ? data.nym.substring(0, 30) + '...'
-                            : data.nym;
-                        document.getElementById('verified-nym').textContent = displayNym;
-                            
-                            // Setup character counter
-                            const textarea = document.getElementById('message-text');
-                            textarea.addEventListener('input', () => {
-                                document.getElementById('char-count').textContent = textarea.value.length;
-                            });
-                        }, 1000);
-                    } else if (data.status === 'invalid') {
-                        clearInterval(pollInterval);
-                        document.getElementById('auth-status').className = 'auth-status error';
-                        document.getElementById('auth-status').textContent = '❌ Authentication failed or expired';
-                    }
-                } catch (error) {
-                    console.error('💥 Polling error:', error);
-                }
-            }, 2000);
-        }
-
-        // Close auth modal
-        function closeAuthModal() {
-            if (pollInterval) {
-                clearInterval(pollInterval);
-                pollInterval = null;
-            }
-            document.getElementById('auth-modal').classList.remove('active');
-            currentNonce = null;
-            currentAuth = null;
-        }
-
-        // Submit message
-        async function submitMessage() {
-            const message = document.getElementById('message-text').value.trim();
-            
-            if (!message) {
-                showError('Please enter a message');
-                return;
-            }
-
-            if (!currentAuth) {
-                showError('Authentication expired. Please try again.');
-                return;
-            }
-
-            const submitBtn = document.getElementById('submit-btn');
-            submitBtn.disabled = true;
-            submitBtn.innerHTML = '<span class="loading"></span>SUBMITTING...';
-
-            try {
-                console.log('📝 Submitting message...');
-                const response = await fetch('/api/guestbook/submit', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        nonce: currentNonce,
-                        message: message,
-                        challenge: currentAuth.challenge,
-                        signature: currentAuth.signature,
-                        nym: currentAuth.paymentCode
-                    })
-                });
-
-                const data = await response.json();
-
-                if (response.ok && data.success) {
-                    console.log('✅ Message submitted successfully');
-                    closeAuthModal();
-                    loadMessages(); // Reload messages
-                    alert('✅ Message submitted successfully!');
-                } else {
-                    showError(data.error || 'Failed to submit message');
-                }
-            } catch (error) {
-                console.error('💥 Submit error:', error);
-                showError('Failed to submit message. Please try again.');
-            } finally {
-                submitBtn.disabled = false;
-                submitBtn.innerHTML = 'SUBMIT MESSAGE';
-            }
-        }
-
-        // Show error message
-        function showError(message) {
-            const errorDiv = document.getElementById('submit-error');
-            errorDiv.textContent = `❌ ${message}`;
-            errorDiv.style.display = 'block';
-            setTimeout(() => {
-                errorDiv.style.display = 'none';
-            }, 5000);
-        }
-
-        // Escape HTML to prevent XSS
-        function escapeHtml(text) {
-            const div = document.createElement('div');
-            div.textContent = text;
-            return div.innerHTML;
-        }
-
-        // Format date
-        function formatDate(dateString) {
-            const date = new Date(dateString);
-            const now = new Date();
-            const diff = now - date;
-            const minutes = Math.floor(diff / 60000);
-            const hours = Math.floor(diff / 3600000);
-            const days = Math.floor(diff / 86400000);
-
-            if (minutes < 1) return 'Just now';
-            if (minutes < 60) return `${minutes} minute${minutes > 1 ? 's' : ''} ago`;
-            if (hours < 24) return `${hours} hour${hours > 1 ? 's' : ''} ago`;
-            if (days < 7) return `${days} day${days > 1 ? 's' : ''} ago`;
-            
-            return date.toLocaleDateString('en-US', { 
-                month: 'short', 
-                day: 'numeric',
-                year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined
-            });
-        }
-
-        console.log('✅ Guestbook initialized');
-        console.log('🔍 Ready for Auth47 authentication');
-    </script>
+    <script src="/js/common.js"></script>
+    <script src="/js/guestbook.js"></script>
 </body>
 </html>

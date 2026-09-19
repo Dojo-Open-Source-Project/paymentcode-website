@@ -1,3 +1,31 @@
+/* Self-hosted latin subsets of the three typefaces the design system declares.
+   Served from our own origin: no visitor request reaches a third-party CDN,
+   which also keeps the Tor hidden service free of clearnet fetches.
+   These are variable fonts, so one file covers the whole weight range. */
+
+@font-face {
+  font-family: 'Inter';
+  font-style: normal;
+  font-weight: 100 900;
+  font-display: swap;
+  src: url(/fonts/inter-var.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'JetBrains Mono';
+  font-style: normal;
+  font-weight: 100 800;
+  font-display: swap;
+  src: url(/fonts/jetbrains-mono-var.woff2) format('woff2');
+}
+
+@font-face {
+  font-family: 'Space Grotesk';
+  font-style: normal;
+  font-weight: 300 700;
+  font-display: swap;
+  src: url(/fonts/space-grotesk-var.woff2) format('woff2');
+}
 /* BIP47 Terminal - Refined Design System */
 /* Moving from "hacker aesthetic" to "precision instrument" */
 
@@ -15,7 +43,9 @@
   
   --text-primary: #dcfce7;      /* Soft mint white (was #00ff41) */
   --text-secondary: #86efac;    /* Muted sage (was #00aa00) */
-  --text-muted: #6b7280;        /* Gray for de-emphasized text */
+  --text-muted: #7d8a99;        /* De-emphasized text. Kept at >=4.5:1 on
+                                   both bg-primary and bg-elevated (WCAG AA);
+                                   the previous #6b7280 was 3.3:1 on cards. */
   
   --border-subtle: rgba(74, 222, 128, 0.15);
   --border-default: rgba(74, 222, 128, 0.3);
@@ -173,6 +203,11 @@ button {
   transition: all var(--transition-normal);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+/* Full-width variant. Buttons used to stretch by default, which meant every
+   inline button (copy, QR toggle) had to opt back out with width:auto. */
+.btn-block {
   width: 100%;
 }
 
@@ -530,7 +565,6 @@ input::placeholder, textarea::placeholder {
   border-radius: var(--radius-sm);
   transition: all var(--transition-fast);
   margin-left: var(--space-sm);
-  width: auto;
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
@@ -573,7 +607,6 @@ input::placeholder, textarea::placeholder {
   border-radius: var(--radius-sm);
   transition: all var(--transition-fast);
   margin-left: var(--space-sm);
-  width: auto;
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
@@ -618,4 +651,55 @@ input::placeholder, textarea::placeholder {
 .address-item::-webkit-scrollbar-thumb {
   background: var(--border-default);
   border-radius: 2px;
+}
+
+
+/* Skip link - first tab stop, visible only when focused */
+.skip-link {
+  position: absolute;
+  left: -9999px;
+  top: 0;
+  background: var(--accent-primary);
+  color: var(--bg-primary);
+  padding: var(--space-sm) var(--space-md);
+  border-radius: var(--radius-sm);
+  font-weight: 600;
+  text-decoration: none;
+  z-index: 2000;
+}
+
+.skip-link:focus {
+  left: var(--space-md);
+  top: var(--space-md);
+}
+
+/* Visible keyboard focus. Buttons and links previously had no focus indicator
+   at all, which made the site unusable without a pointer. :focus-visible keeps
+   the ring off mouse clicks. */
+a:focus-visible,
+button:focus-visible,
+input:focus-visible,
+textarea:focus-visible,
+[tabindex]:focus-visible {
+  outline: 2px solid var(--accent-secondary);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* Respect a reduced-motion preference: drop the lifts, scales and spin. */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+
+  .card:hover,
+  .logo-link:hover,
+  button:hover:not(:disabled) {
+    transform: none;
+  }
 }

@@ -1,6 +1,7 @@
 # Dependencies
 node_modules/
-package-lock.json
+# package-lock.json is committed on purpose: Railway resolves dependencies at
+# deploy time, and an unpinned tree is not something a Bitcoin site should ship.
 
 # Auth47 reference (we don't need to commit this)
 auth47/
