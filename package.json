@@ -2,7 +2,7 @@
   "name": "bip47-terminal",
   "version": "1.0.0",
   "description": "BIP47 payment code and PayNym explorer with Auth47 authentication",
-  "license": "MIT",
+  "license": "AGPL-3.0-only",
   "type": "module",
   "engines": {
     "node": ">=24.0.0"
