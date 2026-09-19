@@ -445,16 +445,40 @@ bip47-website/
 │   ├── guestbook.html  # Guestbook with Auth47
 │   ├── auth.html       # Auth47 demo
 │   ├── callback.html   # Wallet callback page
+│   ├── 404.html        # Not-found page
+│   ├── styles.css      # Shared design system + @font-face
+│   ├── css/            # One stylesheet per page (<page>.css)
+│   ├── js/             # One script per page, plus common.js
+│   ├── fonts/          # Self-hosted variable fonts
 │   └── logos/          # Project logos for SUPPORTED BY sections
-│       ├── samourai.png
-│       ├── sparrow.png
-│       ├── bluewallet.png
-│       ├── stack.png
-│       └── Ashigaru.png
 ├── server.js           # Express server (all backend logic)
 ├── package.json        # Dependencies
+├── package-lock.json   # Committed: deploys must be reproducible
 └── AGENTS.md          # This file
 ```
+
+**No inline `<style>` or `<script>` blocks, and no inline event handlers.**
+The CSP sets `script-src 'self'`, so an `onclick="..."` attribute will simply
+not fire. Pages declare behaviour with `data-action` attributes and register a
+handler in their own script:
+
+```html
+<button data-action="do-thing" data-id="42">Go</button>
+```
+```javascript
+registerActions({
+  'do-thing': (el) => doThing(el.dataset.id)
+});
+```
+
+`common.js` provides `escapeHtml()`, `registerActions()` and
+`registerImageFallbacks()` (use `data-on-error="hide"` or `"placeholder"`
+instead of an `onerror` attribute). Always run API-sourced strings through
+`escapeHtml()` before interpolating them into `innerHTML` — including inside
+attributes, where unescaped quotes would break out.
+
+Full-width buttons opt in with `class="btn-block"`; buttons are auto-width by
+default.
 
 ## UI Components
 

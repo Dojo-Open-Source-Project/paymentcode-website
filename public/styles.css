@@ -203,6 +203,11 @@ button {
   transition: all var(--transition-normal);
   text-transform: uppercase;
   letter-spacing: 0.05em;
+}
+
+/* Full-width variant. Buttons used to stretch by default, which meant every
+   inline button (copy, QR toggle) had to opt back out with width:auto. */
+.btn-block {
   width: 100%;
 }
 
@@ -560,7 +565,6 @@ input::placeholder, textarea::placeholder {
   border-radius: var(--radius-sm);
   transition: all var(--transition-fast);
   margin-left: var(--space-sm);
-  width: auto;
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);
@@ -603,7 +607,6 @@ input::placeholder, textarea::placeholder {
   border-radius: var(--radius-sm);
   transition: all var(--transition-fast);
   margin-left: var(--space-sm);
-  width: auto;
   display: inline-flex;
   align-items: center;
   gap: var(--space-xs);

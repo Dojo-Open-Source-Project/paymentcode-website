@@ -1,0 +1,12 @@
+/* Page-specific styles for index.html */
+.header {
+  text-align: center;
+  margin-bottom: var(--space-xl);
+}
+
+.tagline {
+  color: var(--text-secondary);
+  font-size: 0.85rem;
+  margin-top: var(--space-sm);
+  opacity: 0.8;
+}

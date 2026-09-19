@@ -63,12 +63,19 @@ async function connectToDatabase() {
 connectToDatabase();
 
 // Security headers. Every asset, font and avatar is served from this origin,
-// so the CSP can stay narrow. 'unsafe-inline' is still needed because page
-// styles and scripts currently live inline in the HTML.
+// so the CSP can stay narrow.
+//
+// script-src is strict: all page scripts live in /js and all behaviour is wired
+// through data-action attributes, so there is no inline script to allow. That
+// is the control that actually stops injected markup from executing.
+//
+// style-src still needs 'unsafe-inline' because ~100 style="..." attributes
+// remain in the markup. Narrowing that means converting them to classes; it is
+// a much smaller risk than inline script, so it is left for a later pass.
 app.use((req, res, next) => {
   res.setHeader('Content-Security-Policy', [
     "default-src 'self'",
-    "script-src 'self' 'unsafe-inline'",
+    "script-src 'self'",
     "style-src 'self' 'unsafe-inline'",
     "img-src 'self' data:",
     "font-src 'self'",
