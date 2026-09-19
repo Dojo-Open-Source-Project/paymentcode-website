@@ -1,180 +1,244 @@
-# BIP47 Terminal
+# BIP47 & PayNyms
 
-A web-based terminal for BIP47 Auth47 authentication protocol. This application allows users to authenticate their BIP47 payment codes using QR codes and wallet signatures.
+The source for **[paymentcode.io](https://paymentcode.io)** — a hub for BIP47 reusable
+payment codes and PayNym identity, with a terminal-style cypherpunk interface.
 
-## Features
+Node/Express server, vanilla HTML/CSS/JS frontend, no build step.
 
-- 🖥️ Terminal-style web interface
-- 🔐 BIP47 Auth47 protocol implementation
-- 📱 QR code generation for wallet scanning
-- ⚡ Real-time authentication status
-- 🚀 Ready for Railway deployment
+## What's here
 
-## Quick Start
-
-### Local Development
-
-1. Install dependencies:
-```bash
-npm install
-```
-
-2. Start the server:
-```bash
-npm start
-```
-
-3. Open your browser:
-```
-http://localhost:3000
-```
-
-### Railway Deployment
-
-#### Prerequisites
-- Railway account
-- Railway CLI installed (`npm install -g @railway/cli`)
-- Git repository
-
-#### Deployment Steps
-
-1. **Login to Railway:**
-```bash
-railway login
-```
-
-2. **Initialize Railway project:**
-```bash
-railway init
-```
-
-3. **Set environment variables:**
-```bash
-# Set your callback URL (Railway will provide this after first deploy)
-railway variables set CALLBACK_URL=https://your-app-name.railway.app/callback
-
-# Set production environment
-railway variables set NODE_ENV=production
-```
-
-4. **Deploy:**
-```bash
-railway up
-```
-
-5. **Get your Railway URL:**
-```bash
-railway domain
-```
-
-6. **Update CALLBACK_URL** with your actual Railway URL:
-```bash
-railway variables set CALLBACK_URL=https://your-actual-app-name.railway.app/callback
-railway up
-```
-
-## Environment Variables
-
-| Variable | Description | Default | Required |
-|----------|-------------|---------|----------|
-| `PORT` | Server port | 3000 | No (Railway sets this) |
-| `CALLBACK_URL` | Auth47 callback URL | `http://localhost:3000/callback` | Yes (for production) |
-| `NODE_ENV` | Environment | development | No |
-
-## How It Works
-
-1. **Generate Challenge**: Click "Generate Auth QR Code" to create a new authentication challenge
-2. **Scan with Wallet**: Use Samourai Wallet or compatible BIP47 wallet to scan the QR code
-3. **Automatic Verification**: The app polls for verification status and displays results
-4. **View Results**: See the verified payment code and authentication status
-
-## API Endpoints
-
-- `GET /` - Frontend interface
-- `GET /start-auth` - Generate new authentication challenge
-- `GET /check-auth/:nonce` - Check authentication status (polling)
-- `POST /verify` - Verify wallet signature (called by wallet)
-- `GET /callback` - Callback page for wallet redirect
-- `GET /health` - Health check endpoint
-
-## Project Structure
-
-```
-bip47-terminal/
-├── public/
-│   ├── index.html          # Main frontend interface
-│   └── callback.html       # Wallet callback page
-├── server.js               # Express server with BIP47 logic
-├── package.json            # Dependencies and scripts
-├── railway.json           # Railway deployment configuration
-└── README.md              # This file
-```
+| Page | Path | What it does |
+|------|------|--------------|
+| **Hub** | `/` | Six-card showcase and the supported-by wall |
+| **Auth47 Login** | `/auth` | Sign in with a Bitcoin wallet — no username, no password |
+| **BIP47 Lab** | `/lab` | Payment code validator with byte-level analysis, an interactive "Alice pays Bob" walkthrough, and a signed-message verifier |
+| **PayNym Explorer** | `/paynym` | Search PayNyms, browse payment codes, followers and following |
+| **Guestbook** | `/guestbook` | Leave a message, authenticated with your wallet (MongoDB-backed) |
+| **Documentation** | `/docs` | BIP47 and Auth47 reference, plus this site's API |
+| **About** | `/about` | What BIP47 is and why address reuse costs you privacy |
 
 ## Requirements
 
-Node 24 or later (`@dojo-tools/*` declares `engines: >=24`; `.nvmrc` pins it).
+**Node 24 or later.** `@dojo-tools/*` declares `engines: >=24`; `.nvmrc` pins it so
+Nixpacks builds on the right version. The app does run on Node 22 — the test suite
+passes there — but the floor matches what the dependencies ask for.
 
-## Dependencies
+MongoDB is optional. Without it the server starts normally and only the guestbook
+is disabled.
 
-- **express** - Web server framework
-- **cors** - Cross-origin resource sharing
-- **@bitcoinerlab/secp256k1** - Bitcoin cryptography
-- **@dojo-tools/bip47** - BIP47 payment code implementation
-- **@dojo-tools/auth47** - Auth47 protocol utilities
-- **qrcode** - QR code generation
-
-## Security Notes
-
-- Authentication challenges expire after 5 minutes
-- Each nonce can only be used once
-- Signatures are verified using BIP47 notification keys
-- All sensitive operations are server-side
-
-## Troubleshooting
-
-### Common Issues
-
-1. **"Invalid or expired nonce"**
-   - The QR code may have expired (5-minute timeout)
-   - Try generating a new QR code
-
-2. **"Invalid signature"**
-   - Ensure you're using a compatible BIP47 wallet
-   - Check that the wallet supports Auth47 protocol
-
-3. **Deployment issues**
-   - Verify CALLBACK_URL is set correctly in Railway
-   - Check Railway logs for errors
-
-### Railway Debugging
+## Quick start
 
 ```bash
-# View logs
-railway logs
-
-# Check environment variables
-railway variables list
-
-# Restart service
-railway restart
+npm install
+npm start          # http://localhost:3000
 ```
+
+## Tests
+
+```bash
+npm test
+```
+
+Regression tests for the Auth47 resource binding (see [Security](#security)). They
+spawn a real server and relay a genuinely-signed proof at it. If the binding is
+ever removed, three of them fail.
+
+## Configuration
+
+Create a `.env` file, or set these in your host's environment.
+
+| Variable | Description | Default |
+|----------|-------------|---------|
+| `PORT` | Server port | `3000` |
+| `CALLBACK_URL` | Auth47 callback URL. **Also the resource every proof is checked against**, so it must be the site's real public URL in production | `http://localhost:$PORT/callback` |
+| `MONGODB_URI` | Guestbook storage. Omit to run without it | `mongodb://localhost:27017/bip47-guestbook` |
+| `ONION_ADDRESS` | Hidden service address. When set, an `Onion-Location` header is sent so Tor Browser offers the onion site | unset |
+| `PAYNYM_ORIGIN` | Upstream PayNym API origin. Exists so the proxy can be pointed at a stub in tests | `https://paynym.rs` |
+
+`NODE_ENV` is not read by the application.
+
+## API
+
+### Auth47
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/start-auth` | Generate a challenge (nonce, expiry, QR) |
+| `GET` | `/check-auth/:nonce` | Poll authentication status |
+| `POST` | `/verify` | Verify a wallet's proof |
+| `POST` | `/callback` | Wallet callback; same verification as `/verify` |
+
+### PayNym
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `POST` | `/api/paynym/lookup` | Look up a PayNym by nymID or name |
+| `POST` | `/api/paynym/followers` | Batch follower details (max 50 ids) |
+| `GET` | `/api/paynym/avatar/:code` | Proxy and cache an avatar |
+
+### BIP47 tools
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `POST` | `/api/bip47/validate` | Validate a payment code's format, checksum and version |
+| `POST` | `/api/bip47/verify-message` | Verify a message signed by a payment code's notification address |
+| `GET` | `/api/qr` | Generate a QR code for arbitrary text |
+
+### Guestbook
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/api/guestbook/messages` | List messages |
+| `POST` | `/api/guestbook/submit` | Submit a message (requires a verified Auth47 nonce) |
+
+### System
+
+`GET /health` returns status and whether the database is connected.
+
+A valid 116-character test payment code, generated from a throwaway seed:
+
+```
+PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW
+```
+
+```bash
+curl -X POST http://localhost:3000/api/bip47/validate \
+  -H 'Content-Type: application/json' \
+  -d '{"paymentCode":"PM8TJJwnXi1t3jv52qM2MMZFWa8wJhj8eyZYcC5cjzEfzENMrxJM9fbnQANqmUSptJdiQmoScyf3Y41SGTPHWpf9PLDVvSSq2UEa8WympaepqxETMgPW"}'
+```
+
+## Project structure
+
+```
+paymentcode-website/
+├── public/
+│   ├── *.html              # One file per page, markup only
+│   ├── css/                # One stylesheet per page
+│   ├── js/                 # One script per page, plus common.js
+│   ├── styles.css          # Shared design system and @font-face
+│   ├── fonts/              # Self-hosted variable fonts
+│   └── logos/              # Supported-by logos
+├── test/                   # Auth47 regression tests
+├── scripts/setup-tor.sh    # One-time hidden service setup
+├── tor/torrc               # Hidden service config
+├── server.js               # Express server, all backend logic
+└── AGENTS.md               # Detailed guide for contributors and AI agents
+```
+
+There are **no inline `<style>` or `<script>` blocks and no inline event handlers** —
+the CSP sets `script-src 'self'`, so an `onclick=""` attribute simply will not fire.
+Pages declare behaviour with `data-action` attributes and register handlers via
+`common.js`. See AGENTS.md before adding frontend code.
+
+## Security
+
+### Auth47 proofs are bound to this site
+
+`Auth47Verifier.verifyProof()` answers *"is this signed?"*, not *"is this signed **for
+me**?"*. It checks that a challenge's `r` (resource) parses as a URL, but it cannot
+know which URL is yours.
+
+Without comparing `r` against your own callback URL, an attacker can request a live
+nonce from your server, show a victim the same challenge with `r` naming the
+attacker's site, and relay the victim's genuine signature back to you — opening a
+session in the victim's name. Nonce expiry, single use and a valid signature do not
+prevent this.
+
+Every proof therefore goes through `verifyAuth47Proof(proof, expectedResource)`, which
+takes the expected resource as a **required** argument and throws without it. Both
+`/verify` and `/callback` use it. Never call `verifier.verifyProof()` directly.
+
+> Reported by maxtannahill of [The Dojo Bay](https://dojobay.org). If you are
+> implementing Auth47 yourself, this check is yours to write — no version of the
+> library does it for you.
+
+### Other measures
+
+- **Rate limiting** on every externally reachable endpoint, tuned per cost
+- **Input bounds** before any value reaches a library or an upstream URL: 32 kb JSON
+  bodies, 500-character guestbook messages, 50 follower ids per request, 512-character
+  QR text, 8-second upstream timeouts
+- **CSP** with `script-src 'self'` — no `unsafe-inline` for scripts
+- **CORS** opened only on read-only lookup endpoints; auth and guestbook writes stay
+  same-origin
+- Nonces expire after five minutes and are single use
+- No private keys are ever handled or stored; payment codes are public by design
+
+## Privacy
+
+This is a privacy tool, so the site tries not to leak its own visitors:
+
+- **Avatars are proxied**, never linked straight to `paynym.rs`. Linking them directly
+  would hand a third party every visitor's IP and referer.
+- **Fonts are self-hosted.** No Google Fonts, no CDN.
+- **No analytics, no trackers, no third-party requests of any kind.**
+- **Tor hidden service.** With `ONION_ADDRESS` set, an `Onion-Location` header lets
+  Tor Browser offer the onion site automatically.
+
+## Deployment
+
+### Railway
+
+Deploys from `master` via Nixpacks (`railway.json`). Set `CALLBACK_URL` to the real
+public URL — it is what proofs are verified against — and `MONGODB_URI` if you want
+the guestbook.
+
+```bash
+railway variables set CALLBACK_URL=https://paymentcode.io/callback
+railway up
+railway logs
+```
+
+### Tor hidden service
+
+For a VPS running the app behind systemd. Run once, as root, from the repo root:
+
+```bash
+sudo bash scripts/setup-tor.sh
+```
+
+It installs Tor, deploys `tor/torrc`, starts the service and prints the generated
+`.onion` address. Add that to the VPS `.env` as `ONION_ADDRESS` and restart the app.
+Back up `/var/lib/tor/hidden_service` — losing the key means losing the address.
 
 ## Contributing
 
-1. Fork the repository
-2. Create a feature branch
-3. Make your changes
-4. Test locally
-5. Deploy to Railway for testing
-6. Submit a pull request
+Read **AGENTS.md** first; it documents the frontend conventions, request limits and
+the Auth47 binding rule in detail.
+
+1. Branch from `master`
+2. Make your change
+3. `npm test` and `npm start`, and check the browser console
+4. Open a pull request
+
+Corrections to the documentation are especially welcome — the Auth47 gap above was
+found by someone implementing from `/docs` and reporting what was missing.
+
+## Dependencies
+
+| Package | Role |
+|---------|------|
+| `express` | Web server |
+| `@bitcoinerlab/secp256k1` | secp256k1 implementation |
+| `@dojo-tools/bip47` | BIP47 payment codes |
+| `@dojo-tools/auth47` | Auth47 protocol |
+| `@dojo-tools/bitcoinjs-message` | Bitcoin message signing and verification |
+| `mongodb` | Guestbook storage |
+| `qrcode` | QR generation |
+| `express-rate-limit` | Per-endpoint rate limiting |
+| `cors`, `dotenv` | CORS, `.env` loading |
+
+The `@dojo-tools` packages were previously `@samouraiwallet/*`, before the projects
+moved to the [dojo-tools](https://github.com/Dojo-Open-Source-Project/dojo-tools)
+monorepo. The public API is unchanged across that move.
 
 ## License
 
-MIT License - see LICENSE file for details
+MIT. See `package.json`.
 
-## Support
+## Links
 
-For issues with:
-- **BIP47 Protocol**: Check [Samourai Wallet documentation](https://freesamourai.com/)
-- **Railway Deployment**: See [Railway docs](https://docs.railway.app/)
-- **This Application**: Create an issue in the repository
+- **BIP47 specification** — [bips/bip-0047](https://github.com/bitcoin/bips/blob/master/bip-0047.mediawiki)
+- **PayNym API** — see `paynym-api.md`
+- **Railway** — [docs.railway.app](https://docs.railway.app/)
+- **Issues** — [github.com/linkinparkrulz/paymentcode-website/issues](https://github.com/linkinparkrulz/paymentcode-website/issues)

@@ -430,6 +430,36 @@ button.primary:hover:not(:disabled) {
   color: var(--accent-error);
 }
 
+/* Source link. Inline SVG rather than an image file so it needs no extra
+   request and stays within img-src 'self'. */
+.footer-links {
+  display: flex;
+  justify-content: center;
+  gap: var(--space-md);
+  margin-top: var(--space-md);
+}
+
+.footer-link {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-xs);
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.75rem;
+  transition: color var(--transition-fast);
+}
+
+.footer-link:hover {
+  color: var(--accent-primary);
+}
+
+.footer-link svg {
+  width: 16px;
+  height: 16px;
+  fill: currentColor;
+  flex-shrink: 0;
+}
+
 /* Input Fields */
 input, textarea {
   width: 100%;
