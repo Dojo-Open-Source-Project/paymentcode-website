@@ -485,6 +485,13 @@ attributes, where unescaped quotes would break out.
 Full-width buttons opt in with `class="btn-block"`; buttons are auto-width by
 default.
 
+**Inline `<svg>` must carry `width` and `height` attributes**, not just a
+`viewBox`. An SVG with only a viewBox has no intrinsic size, so if the
+stylesheet has not applied yet - a stale cached `styles.css` (static assets are
+served with `max-age=3600`), a slow load, a blocked request - it expands to fill
+its container. The footer icon rendered at 1264px that way. CSS may still size
+it; the attributes are the floor.
+
 ## UI Components
 
 ### SUPPORTED BY Section
