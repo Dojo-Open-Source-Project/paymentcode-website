@@ -19,9 +19,9 @@ Node/Express server, vanilla HTML/CSS/JS frontend, no build step.
 
 ## Requirements
 
-**Node 24 or later.** `@dojo-tools/*` declares `engines: >=24`; `.nvmrc` pins it so
-Nixpacks builds on the right version. The app does run on Node 22 — the test suite
-passes there — but the floor matches what the dependencies ask for.
+**Node 24 or later.** `@dojo-tools/*` declares `engines: >=24`; `.nvmrc` pins it, so
+`nvm use` in the repo root selects the right version. The app does run on Node 22 —
+the test suite passes there — but the floor matches what the dependencies ask for.
 
 MongoDB is optional. Without it the server starts normally and only the guestbook
 is disabled.
@@ -177,17 +177,44 @@ This is a privacy tool, so the site tries not to leak its own visitors:
 
 ## Deployment
 
-### Railway
-
-Deploys from `master` via Nixpacks (`railway.json`). Set `CALLBACK_URL` to the real
-public URL — it is what proofs are verified against — and `MONGODB_URI` if you want
-the guestbook.
+Production runs on a VPS under [pm2](https://pm2.keymetrics.io/), with a Tor hidden
+service alongside it.
 
 ```bash
-railway variables set CALLBACK_URL=https://paymentcode.io/callback
-railway up
-railway logs
+git pull
+npm ci                     # respects package-lock.json
+pm2 restart bip47          # or: pm2 start server.js --name bip47
+pm2 logs bip47
 ```
+
+Configuration comes from a `.env` file in the repo root, loaded automatically by
+`dotenv`. At minimum set `CALLBACK_URL` to the real public URL — it is the resource
+every Auth47 proof is verified against, so a wrong value means every login fails —
+plus `MONGODB_URI` if you want the guestbook and `ONION_ADDRESS` once Tor is set up.
+
+```
+CALLBACK_URL=https://paymentcode.io/callback
+MONGODB_URI=mongodb://localhost:27017/bip47-guestbook
+ONION_ADDRESS=yourhiddenservice.onion
+```
+
+To survive a reboot:
+
+```bash
+pm2 save
+pm2 startup                # then run the command it prints
+```
+
+### Reverse proxy
+
+The app listens on `PORT` (default 3000) and speaks plain HTTP; TLS is terminated in
+front of it. `server.js` sets `trust proxy` to `1`, meaning it trusts exactly one
+proxy hop for the client IP.
+
+**That number must match your setup.** Rate limiting keys on `req.ip`: with no proxy
+in front, a client could spoof `X-Forwarded-For` and bypass the limits; with two hops
+(a CDN in front of nginx, say), every request would appear to come from the same
+address and legitimate users would rate-limit each other.
 
 ### Tor hidden service
 
@@ -240,5 +267,4 @@ MIT. See `package.json`.
 
 - **BIP47 specification** — [bips/bip-0047](https://github.com/bitcoin/bips/blob/master/bip-0047.mediawiki)
 - **PayNym API** — see `paynym-api.md`
-- **Railway** — [docs.railway.app](https://docs.railway.app/)
 - **Issues** — [github.com/linkinparkrulz/paymentcode-website/issues](https://github.com/linkinparkrulz/paymentcode-website/issues)
