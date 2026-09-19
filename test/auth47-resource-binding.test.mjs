@@ -12,9 +12,9 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import ecc from '@bitcoinerlab/secp256k1';
-import { BIP47Factory } from '@samouraiwallet/bip47';
-import { networks } from '@samouraiwallet/bip47/utils';
-import { bitcoinMessageFactory } from '@samouraiwallet/bitcoinjs-message';
+import { BIP47Factory } from '@dojo-tools/bip47';
+import { networks } from '@dojo-tools/bip47/utils';
+import { bitcoinMessageFactory } from '@dojo-tools/bitcoinjs-message';
 
 const PORT = 3199;
 const BASE = `http://localhost:${PORT}`;

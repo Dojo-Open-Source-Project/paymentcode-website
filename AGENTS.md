@@ -8,8 +8,11 @@ This is a Node.js/Express web application implementing BIP47 Auth47 authenticati
 
 **Tech Stack:**
 - Backend: Node.js with Express (ES modules)
+- **Node 24 or later.** `@dojo-tools/*` declares `engines: >=24`. The app does
+  in fact run on Node 22 (the test suite passes there), but the floor matches
+  what the dependencies ask for. `.nvmrc` pins 24 so Nixpacks builds on it.
 - Frontend: Vanilla HTML/CSS/JavaScript
-- Cryptography: @bitcoinerlab/secp256k1, @samouraiwallet/bip47
+- Cryptography: @bitcoinerlab/secp256k1, @dojo-tools/bip47
 - Deployment: Railway (production), localhost (development)
 
 ## Project Vision & Roadmap
@@ -721,7 +724,16 @@ railway logs
 ## Key Dependencies
 
 - **@bitcoinerlab/secp256k1**: Bitcoin cryptography (signature verification)
-- **@samouraiwallet/bip47**: BIP47 payment code implementation
+- **@dojo-tools/bip47**: BIP47 payment code implementation
+- **@dojo-tools/auth47**: Auth47 protocol (verification is NOT resource-bound;
+  see the Auth47 resource binding section)
+- **@dojo-tools/bitcoinjs-message**: Bitcoin message signing/verification
+
+These were `@samouraiwallet/*` until the projects moved to the
+[dojo-tools](https://github.com/Dojo-Open-Source-Project/dojo-tools) monorepo.
+The public API is unchanged across that move, and payment codes, notification
+addresses and signatures are byte-identical between the old and new versions,
+so the migration was import renames only.
 - **express**: Web server framework
 - **cors**: Cross-origin resource sharing
 - **qrcode**: QR code generation

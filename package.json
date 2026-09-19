@@ -5,7 +5,7 @@
   "license": "MIT",
   "type": "module",
   "engines": {
-    "node": ">=18.0.0"
+    "node": ">=24.0.0"
   },
   "scripts": {
     "start": "node server.js",
@@ -16,9 +16,9 @@
   },
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^1.1.1",
-    "@samouraiwallet/auth47": "^1.0.1",
-    "@samouraiwallet/bip47": "^1.0.3",
-    "@samouraiwallet/bitcoinjs-message": "^3.1.1",
+    "@dojo-tools/auth47": "^2.0.1",
+    "@dojo-tools/bip47": "^2.0.1",
+    "@dojo-tools/bitcoinjs-message": "^4.0.1",
     "cors": "^2.8.5",
     "dotenv": "^16.4.5",
     "express": "^4.18.2",

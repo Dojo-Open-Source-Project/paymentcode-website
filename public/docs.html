@@ -589,7 +589,7 @@ k = b + s  // Bob's private key + shared secret scalar</code></pre>
                     </div>
                     <pre><code>import ecc from '@bitcoinerlab/secp256k1';
 import { BIP32Factory } from 'bip32';
-import { BIP47Factory } from '@samouraiwallet/bip47';
+import { BIP47Factory } from '@dojo-tools/bip47';
 
 const bip32 = BIP32Factory(ecc);
 const bip47 = BIP47Factory(ecc);
@@ -621,13 +621,14 @@ console.log(paymentAddress);
 
                 <div class="info-box">
                     <p>
-                        <strong>Package note:</strong> <code>@samouraiwallet/bip47</code> and
-                        <code>@samouraiwallet/auth47</code> have moved to
-                        <code>@dojo-tools/bip47</code> and <code>@dojo-tools/auth47</code>. The
-                        examples below show the <code>@samouraiwallet</code> packages because that
-                        is what this site currently runs. The <code>@dojo-tools</code> releases are
-                        a major version and require Node 24 or later, so check the API against the
-                        version you install.
+                        <strong>Package note:</strong> these libraries were published as
+                        <code>@samouraiwallet/bip47</code> and <code>@samouraiwallet/auth47</code>.
+                        They now live in the
+                        <a href="https://github.com/Dojo-Open-Source-Project/dojo-tools" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">dojo-tools</a>
+                        monorepo as <code>@dojo-tools/bip47</code> and
+                        <code>@dojo-tools/auth47</code>, which is what this site runs and what the
+                        examples below use. The public API is unchanged, but the
+                        <code>@dojo-tools</code> releases require <strong>Node 24 or later</strong>.
                     </p>
                 </div>
 
@@ -636,7 +637,7 @@ console.log(paymentAddress);
                     <div class="code-header">
                         <span class="lang">JavaScript</span>
                     </div>
-                    <pre><code>import { Auth47Verifier } from '@samouraiwallet/auth47';
+                    <pre><code>import { Auth47Verifier } from '@dojo-tools/auth47';
 
 // Constructor takes (ecc, callbackUrl) - ECC library first, then the URL.
 const verifier = new Auth47Verifier(ecc, callbackUrl);
@@ -718,9 +719,9 @@ https://paynym.rs/{payment_code}/avatar</code></pre>
                         <span class="lang">JavaScript</span>
                     </div>
                     <pre><code>import ecc from '@bitcoinerlab/secp256k1';
-import { BIP47Factory } from '@samouraiwallet/bip47';
-import { networks } from '@samouraiwallet/bip47/utils';
-import { bitcoinMessageFactory } from '@samouraiwallet/bitcoinjs-message';
+import { BIP47Factory } from '@dojo-tools/bip47';
+import { networks } from '@dojo-tools/bip47/utils';
+import { bitcoinMessageFactory } from '@dojo-tools/bitcoinjs-message';
 
 const bip47 = BIP47Factory(ecc);
 const bitcoinjsMessage = bitcoinMessageFactory(ecc);
@@ -833,13 +834,13 @@ console.log(isValid ? '✅ Signature verified!' : '❌ Invalid signature');</cod
                 <h3>Libraries</h3>
                 <ul>
                     <li>
-                        <a href="https://www.npmjs.com/package/@samouraiwallet/bip47" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
-                            @samouraiwallet/bip47
+                        <a href="https://www.npmjs.com/package/@dojo-tools/bip47" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
+                            @dojo-tools/bip47
                         </a> - BIP47 implementation for JavaScript/TypeScript
                     </li>
                     <li>
-                        <a href="https://www.npmjs.com/package/@samouraiwallet/auth47" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
-                            @samouraiwallet/auth47
+                        <a href="https://www.npmjs.com/package/@dojo-tools/auth47" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
+                            @dojo-tools/auth47
                         </a> - Auth47 verification library
                     </li>
                     <li>
