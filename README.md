@@ -261,7 +261,14 @@ monorepo. The public API is unchanged across that move.
 
 ## License
 
-MIT. See `package.json`.
+GNU Affero General Public License v3.0 (`AGPL-3.0-only`). See [`LICENSE`](LICENSE).
+
+This matches the licensing of the Dojo Open Source Project's network-served
+applications, such as [samourai-dojo](https://github.com/Dojo-Open-Source-Project/samourai-dojo)
+and [soroban](https://github.com/Dojo-Open-Source-Project/soroban). Because this
+project is run as a network service, AGPL section 13 requires that users
+interacting with a modified version over a network be able to obtain its source;
+the footer on every page links back to this repository for that reason.
 
 ## Links
 
