@@ -171,6 +171,6 @@ MIT License - see LICENSE file for details
 ## Support
 
 For issues with:
-- **BIP47 Protocol**: Check [Samourai Wallet documentation](https://samouraiwallet.com/)
+- **BIP47 Protocol**: Check [Samourai Wallet documentation](https://freesamourai.com/)
 - **Railway Deployment**: See [Railway docs](https://docs.railway.app/)
 - **This Application**: Create an issue in the repository

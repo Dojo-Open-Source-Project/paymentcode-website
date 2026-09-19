@@ -196,7 +196,7 @@ k = b + s  // Bob's private key + shared secret scalar</code></pre>
                     <li><strong>Challenge Generation:</strong> Server generates a unique nonce and creates an Auth47 URI</li>
                     <li><strong>QR Display:</strong> User scans the QR code with a compatible wallet</li>
                     <li><strong>Signature:</strong> Wallet signs the challenge using the notification address private key</li>
-                    <li><strong>Verification:</strong> Server verifies the signature against the claimed payment code</li>
+                    <li><strong>Verification:</strong> Server verifies the signature against the claimed payment code, <em>and</em> that the challenge it was signed over names this server in <code>r</code></li>
                     <li><strong>Authentication:</strong> Upon successful verification, user is authenticated</li>
                 </ol>
 
@@ -227,7 +227,12 @@ k = b + s  // Bob's private key + shared secret scalar</code></pre>
                         </tr>
                         <tr>
                             <td><code>r</code></td>
-                            <td>Resource URL (optional) - if omitted, callback URL is used as resource</td>
+                            <td>
+                                Resource URL. The site the user is authenticating to, and what their
+                                wallet displays. If omitted, the callback URL is used.
+                                <strong>The server must compare this against its own URL when
+                                verifying a proof; see Security Considerations.</strong>
+                            </td>
                         </tr>
                         <tr>
                             <td><code>e</code></td>
@@ -277,11 +282,32 @@ k = b + s  // Bob's private key + shared secret scalar</code></pre>
 
                 <h4>Security Considerations</h4>
                 <ul>
+                    <li>
+                        <strong>The server MUST verify that the challenge's <code>r</code> (resource)
+                        value is its own URL.</strong> The library checks that <code>r</code> is a
+                        well-formed URL but cannot know which URL is yours. Without this comparison,
+                        an attacker can take a live nonce from your server, present a victim with the
+                        same challenge naming the attacker's site in <code>r</code>, and relay the
+                        signed proof back to you: the signature is genuine and a session is created
+                        in the victim's name. Compare the two as parsed URLs, so a trailing slash is
+                        not treated as a different site while a different origin or path is.
+                    </li>
                     <li>Nonces expire after 5 minutes to prevent replay attacks</li>
                     <li>Each nonce can only be used once</li>
                     <li>Signatures must use the Bitcoin Message Signing format</li>
                     <li>Servers should validate the expiry timestamp</li>
                 </ul>
+
+                <div class="info-box" style="border-color: var(--accent-warning);">
+                    <p>
+                        <strong>Why the first item matters most:</strong> the other four all concern
+                        whether a proof is fresh and genuine. Only the resource check answers a
+                        different question &mdash; whether it was made <em>for you</em>. A signature
+                        is evidence of what it was signed over, nothing more. Thanks to
+                        <a href="https://dojobay.org" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">The Dojo Bay</a>
+                        for reporting this gap.
+                    </p>
+                </div>
 
                 <div class="info-box">
                     <p>
@@ -593,6 +619,18 @@ console.log(paymentAddress);
 // tb1q8gpft5rpju8lcshfa6at44pev5y0q7kzfwqpg</code></pre>
                 </div>
 
+                <div class="info-box">
+                    <p>
+                        <strong>Package note:</strong> <code>@samouraiwallet/bip47</code> and
+                        <code>@samouraiwallet/auth47</code> have moved to
+                        <code>@dojo-tools/bip47</code> and <code>@dojo-tools/auth47</code>. The
+                        examples below show the <code>@samouraiwallet</code> packages because that
+                        is what this site currently runs. The <code>@dojo-tools</code> releases are
+                        a major version and require Node 24 or later, so check the API against the
+                        version you install.
+                    </p>
+                </div>
+
                 <h3>Verify Auth47 Signature</h3>
                 <div class="code-block">
                     <div class="code-header">
@@ -600,22 +638,40 @@ console.log(paymentAddress);
                     </div>
                     <pre><code>import { Auth47Verifier } from '@samouraiwallet/auth47';
 
-// IMPORTANT: Constructor expects (callbackUrl, ecc) - URL first, then ECC library
-const verifier = new Auth47Verifier(callbackUrl, ecc);
+// Constructor takes (ecc, callbackUrl) - ECC library first, then the URL.
+const verifier = new Auth47Verifier(ecc, callbackUrl);
 
 const proof = {
-  auth47_response: challengeUri,
+  auth47_response: '1.0',
   challenge: challengeUri,
   nym: paymentCode,
   signature: base64Signature
 };
 
 const result = verifier.verifyProof(proof, 'bitcoin');
-if (result.result === 'ok') {
-  console.log('Authentication successful!');
-} else {
-  console.error('Authentication failed:', result.error);
-}</code></pre>
+if (result.result !== 'ok') {
+  throw new Error(result.error);
+}
+
+// REQUIRED: the signature proves what it was made over, not who it was made
+// for. verifyProof cannot know which resource is yours, so compare it yourself.
+const sameSite = (a, b) => {
+  try {
+    const norm = (u) => {
+      const x = new URL(u);
+      return x.origin.toLowerCase() + x.pathname.replace(/\/+$/, '') + x.search;
+    };
+    return norm(a) === norm(b);
+  } catch { return false; }
+};
+
+const resource = new URL(proof.challenge).searchParams.get('r');
+if (!resource || !sameSite(resource, MY_SITE_URL)) {
+  throw new Error('proof was signed for a different site');
+}
+
+// Only now is the payment code in proof.nym authenticated to THIS site.
+console.log('Authentication successful!');</code></pre>
                 </div>
 
                 <h3>Lookup PayNym</h3>
@@ -768,7 +824,7 @@ console.log(isValid ? '✅ Signature verified!' : '❌ Invalid signature');</cod
                         </a> - Authentication protocol specification
                     </li>
                     <li>
-                        <a href="https://github.com/Dojo-Open-Source-Project/auth47" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
+                        <a href="https://github.com/Dojo-Open-Source-Project/dojo-tools" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
                             Auth47 Github Repository
                         </a> - Authentication protocol specification
                     </li>
@@ -796,7 +852,7 @@ console.log(isValid ? '✅ Signature verified!' : '❌ Invalid signature');</cod
                 <h3>Wallets Supporting BIP47</h3>
                 <ul>
                     <li>
-                        <a href="https://samouraiwallet.com" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
+                        <a href="https://freesamourai.com" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
                             Samourai Wallet
                         </a> - Android wallet with full BIP47/PayNym support
                     </li>
@@ -845,7 +901,7 @@ console.log(isValid ? '✅ Signature verified!' : '❌ Invalid signature');</cod
                     <p>
                         <strong>Contribute:</strong> Found an error or want to improve this documentation? 
                         Submit a pull request to the 
-                        <a href="https://github.com/linkinparkrulz/bip47-website-2" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
+                        <a href="https://github.com/linkinparkrulz/paymentcode-website" target="_blank" rel="noopener noreferrer" style="color: var(--accent-secondary);">
                             GitHub repository
                         </a>.
                     </p>

@@ -11,7 +11,8 @@
     "start": "node server.js",
     "dev": "node server.js",
     "build": "echo 'Building BIP47 Terminal...' && ls -la public/ && echo 'Public directory contents verified'",
-    "railway:deploy": "railway up"
+    "railway:deploy": "railway up",
+    "test": "node --test \"test/*.test.mjs\""
   },
   "dependencies": {
     "@bitcoinerlab/secp256k1": "^1.1.1",

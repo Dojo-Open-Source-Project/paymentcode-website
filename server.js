@@ -208,112 +208,127 @@ app.get('/check-auth/:nonce', authLimiter, (req, res) => {
 });
 
 // Verify Auth47 proof
+// --- Auth47 proof verification ----------------------------------------------
+
+// Compares two resource URLs. A trailing slash must not make a different site;
+// a different origin or path must.
+function sameResource(a, b) {
+  try {
+    const norm = (value) => {
+      const url = new URL(value);
+      return url.origin.toLowerCase() + url.pathname.replace(/\/+$/, '') + url.search;
+    };
+    return norm(a) === norm(b);
+  } catch {
+    return false;
+  }
+}
+
+// Validates an Auth47 proof against a pending challenge.
+//
+// expectedResource is REQUIRED on purpose. A verifier that takes only the proof
+// answers "is this signed?" when the question is "is this signed FOR ME?".
+// Auth47Verifier.verifyProof() checks that the challenge's `r` parses as an
+// http(s) URL, but it has no way to know which URL is ours. Without the
+// comparison below, an attacker can request a live nonce from us, show a victim
+// the same challenge with `r` pointing at the attacker's site, and relay the
+// victim's genuine signature back here to open a session in the victim's name.
+// Nonce expiry, single use and signature validity do not prevent that; only
+// binding the proof to this site's resource does.
+function verifyAuth47Proof(proof, expectedResource) {
+  if (!expectedResource) {
+    throw new Error('verifyAuth47Proof requires an expected resource');
+  }
+
+  const { challenge, nym, signature } = proof ?? {};
+
+  if (!challenge || !nym || !signature) {
+    return { ok: false, error: 'Missing required fields: challenge, nym, signature' };
+  }
+
+  let challengeUrl;
+  try {
+    challengeUrl = new URL(challenge);
+  } catch {
+    return { ok: false, error: 'Invalid challenge format' };
+  }
+
+  const nonce = challengeUrl.hostname || challengeUrl.pathname.replace(/^\/\//, '');
+  const params = challengeUrl.searchParams;
+
+  const challengeExpiry = params.get('e');
+  if (!challengeExpiry) {
+    return { ok: false, error: 'Missing expiry parameter in challenge' };
+  }
+
+  const auth = pendingAuths.get(nonce);
+  if (!auth) {
+    return { ok: false, error: 'Invalid or expired nonce' };
+  }
+
+  const expiryTime = Number.parseInt(challengeExpiry, 10);
+  if (!Number.isFinite(expiryTime) || expiryTime <= Math.floor(Date.now() / 1000)) {
+    return { ok: false, error: 'Challenge has expired' };
+  }
+
+  if (auth.expiry !== expiryTime) {
+    return { ok: false, error: 'Expiry mismatch in challenge' };
+  }
+
+  if (auth.verified) {
+    return { ok: false, error: 'Nonce already used' };
+  }
+
+  // The resource binding. See the note above: this is the check that makes the
+  // wallet's "you are signing in to X" display mean anything server-side.
+  const resource = params.get('r');
+  if (!resource) {
+    return { ok: false, error: 'Missing resource parameter in challenge' };
+  }
+
+  if (!sameResource(resource, expectedResource)) {
+    console.error(`🚨 Resource mismatch: proof signed for "${resource}", expected "${expectedResource}"`);
+    return { ok: false, error: 'Proof was signed for a different site' };
+  }
+
+  const verifiedProof = verifier.verifyProof(proof, 'bitcoin');
+  if (verifiedProof.result !== 'ok') {
+    return { ok: false, error: verifiedProof.error };
+  }
+
+  return { ok: true, auth, nonce };
+}
+
+// Records a successful verification against its pending challenge.
+function markVerified(auth, proof) {
+  auth.verified = true;
+  auth.nym = proof.nym;
+  auth.paymentCode = proof.nym;
+  auth.challenge = proof.challenge;
+  auth.signature = proof.signature;
+}
+
+// Verify Auth47 proof
 app.post('/verify', authLimiter, async (req, res) => {
   try {
-    console.log('📥 Received verification request:', JSON.stringify(req.body, null, 2));
-    
-    const { auth47_response, challenge, nym, signature } = req.body;
-    
-    // Validate required fields
-    if (!challenge || !nym || !signature) {
-      console.error('❌ Missing required fields');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Missing required fields: challenge, nym, signature'
-      });
+    console.log('📥 Received verification request');
+
+    const result = verifyAuth47Proof(req.body, CALLBACK_URL);
+
+    if (!result.ok) {
+      console.error(`❌ Verification failed: ${result.error}`);
+      return res.status(400).json({ result: 'error', error: result.error });
     }
-    
-    // Parse challenge URL to extract nonce and validate expiry
-    let nonce;
-    let challengeExpiry;
-    try {
-      const challengeUrl = new URL(challenge);
-      nonce = challengeUrl.hostname || challengeUrl.pathname.replace(/^\/\//, '');
-      
-      // Extract expiry from challenge parameters
-      const params = new URLSearchParams(challengeUrl.search);
-      challengeExpiry = params.get('e');
-      
-      if (!challengeExpiry) {
-        console.error('❌ Missing expiry parameter in challenge');
-        return res.status(400).json({
-          result: 'error',
-          error: 'Missing expiry parameter in challenge'
-        });
-      }
-    } catch (e) {
-      console.error('❌ Invalid challenge format:', challenge);
-      return res.status(400).json({
-        result: 'error',
-        error: 'Invalid challenge format'
-      });
-    }
-    
-    console.log(`🔍 Extracted nonce: ${nonce}, expiry: ${challengeExpiry}`);
-    
-    // Verify nonce exists
-    const auth = pendingAuths.get(nonce);
-    if (!auth) {
-      console.error('❌ Invalid or expired nonce');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Invalid or expired nonce'
-      });
-    }
-    
-    // Verify expiry matches and is not expired
-    const currentTime = Math.floor(Date.now() / 1000);
-    const expiryTime = parseInt(challengeExpiry, 10);
-    
-    if (expiryTime <= currentTime) {
-      console.error('❌ Challenge has expired');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Challenge has expired'
-      });
-    }
-    
-    if (auth.expiry !== expiryTime) {
-      console.error('❌ Expiry mismatch in challenge');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Expiry mismatch in challenge'
-      });
-    }
-    
-    if (auth.verified) {
-      console.error('❌ Nonce already used');
-      return res.status(400).json({
-        result: 'error',
-        error: 'Nonce already used'
-      });
-    }
-    
-    // Verify signature using Auth47 library (Bitcoin Message Signing protocol)
-    const verifiedProof = verifier.verifyProof(req.body, 'bitcoin');
-    
-    if (verifiedProof.result === 'ok') {
-      // Mark as verified and store auth data
-      auth.verified = true;
-      auth.nym = nym;
-      auth.paymentCode = nym;
-      auth.challenge = challenge;
-      auth.signature = signature;
-      
-      console.log(`🎉 Authentication successful for ${nym}`);
-      
-      res.json({
-        result: 'ok',
-        nym,
-        payment_code: nym
-      });
-    } else {
-      console.error(`❌ Invalid signature: ${verifiedProof.error}`);
-      res.json({
-        result: 'error',
-        error: verifiedProof.error
-      });
-    }
+
+    markVerified(result.auth, req.body);
+    console.log(`🎉 Authentication successful for ${req.body.nym}`);
+
+    res.json({
+      result: 'ok',
+      nym: req.body.nym,
+      payment_code: req.body.nym
+    });
+
   } catch (error) {
     console.error('💥 Verification error:', error);
     res.status(400).json({
@@ -325,102 +340,35 @@ app.post('/verify', authLimiter, async (req, res) => {
 
 // Callback endpoint (displayed after wallet scans)
 app.get('/callback', (req, res) => {
-  res.sendFile(path.join(__dirname, 'public', 'callback.html'));
+  res.sendFile(path.join(PUBLIC_DIR, 'callback.html'));
 });
 
-// Handle Auth47 wallet callback (POST request from wallet)
-app.post('/callback', async (req, res) => {
+// Handle Auth47 wallet callback (POST request from wallet).
+// Runs the identical verification as /verify - the resource binding must not
+// depend on which entry point the wallet happens to use.
+app.post('/callback', authLimiter, async (req, res) => {
   try {
-    console.log('📥 Received Auth47 callback:', JSON.stringify(req.body, null, 2));
-    
-    const { auth47_response, challenge, nym, signature } = req.body;
-    
-    // Validate required fields
-    if (!challenge || !nym || !signature) {
-      console.error('❌ Missing required fields in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
+    console.log('📥 Received Auth47 callback');
+
+    const result = verifyAuth47Proof(req.body, CALLBACK_URL);
+
+    if (!result.ok) {
+      console.error(`❌ Callback verification failed: ${result.error}`);
+      return res.status(400).sendFile(path.join(PUBLIC_DIR, 'callback.html'));
     }
-    
-    // Parse challenge URL to extract nonce and validate expiry
-    let nonce;
-    let challengeExpiry;
-    try {
-      const challengeUrl = new URL(challenge);
-      nonce = challengeUrl.hostname || challengeUrl.pathname.replace(/^\/\//, '');
-      
-      // Extract expiry from challenge parameters
-      const params = new URLSearchParams(challengeUrl.search);
-      challengeExpiry = params.get('e');
-      
-      if (!challengeExpiry) {
-        console.error('❌ Missing expiry parameter in challenge');
-        return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-      }
-    } catch (e) {
-      console.error('❌ Invalid challenge format in callback:', challenge);
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    console.log(`🔍 Callback - Extracted nonce: ${nonce}, expiry: ${challengeExpiry}`);
-    
-    // Verify nonce exists
-    const auth = pendingAuths.get(nonce);
-    if (!auth) {
-      console.error('❌ Invalid or expired nonce in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    // Verify expiry matches and is not expired
-    const currentTime = Math.floor(Date.now() / 1000);
-    const expiryTime = parseInt(challengeExpiry, 10);
-    
-    if (expiryTime <= currentTime) {
-      console.error('❌ Challenge has expired in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    if (auth.expiry !== expiryTime) {
-      console.error('❌ Expiry mismatch in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    if (auth.verified) {
-      console.error('❌ Nonce already used in callback');
-      return res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
-    
-    // Verify signature using Auth47 library (Bitcoin Message Signing protocol)
-    try {
-      const verifiedProof = verifier.verifyProof(req.body, 'bitcoin');
-      
-      if (verifiedProof.result === 'ok') {
-        // Mark as verified and store auth data
-        auth.verified = true;
-        auth.nym = nym;
-        auth.paymentCode = nym;
-        auth.challenge = challenge;
-        auth.signature = signature;
-        
-        console.log(`🎉 Authentication successful via callback for ${nym}`);
-        
-        // Redirect to callback page with nonce parameter so it can poll auth status
-        return res.redirect(`/callback?nonce=${nonce}`);
-      } else {
-        console.log(`❌ Callback verification failed: ${verifiedProof.error}`);
-        // Redirect to callback page with nonce for error display
-        return res.redirect(`/callback?nonce=${nonce}`);
-      }
-    } catch (verifyError) {
-      console.log('❌ Callback verification error:', verifyError.message);
-      // Still serve the callback page
-      res.sendFile(path.join(__dirname, 'public', 'callback.html'));
-    }
+
+    markVerified(result.auth, req.body);
+    console.log(`🎉 Authentication successful via callback for ${req.body.nym}`);
+
+    // Redirect to the callback page with the nonce so it can poll auth status
+    return res.redirect(`/callback?nonce=${result.nonce}`);
+
   } catch (error) {
     console.error('💥 Callback error:', error);
-    // Still serve the callback page even on error
-    res.sendFile(path.join(__dirname, 'public', 'callback.html'));
+    res.status(400).sendFile(path.join(PUBLIC_DIR, 'callback.html'));
   }
 });
+
 
 // Health check
 app.get('/health', (req, res) => {

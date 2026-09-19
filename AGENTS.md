@@ -746,11 +746,42 @@ railway logs
 
 ## Security Considerations
 
+- **Auth47 proofs MUST be bound to this site's resource URL.** See below.
 - Nonces expire after 5 minutes
 - Each nonce can only be used once
 - All signature verification happens server-side
 - Payment codes are public (BIP47 design)
 - No private keys are stored or handled
+
+### Auth47 resource binding (do not remove)
+
+`Auth47Verifier.verifyProof()` answers "is this signed?", not "is this signed
+**for me**?". It validates that the challenge's `r` parses as an http(s) URL,
+but it has no idea which URL is ours. Without comparing `r` to our own callback
+URL, an attacker can request a live nonce here, show a victim the same challenge
+with `r` naming the attacker's site, and relay the victim's genuine signature
+back to us — creating a session in the victim's name. Nonce expiry, single use
+and a valid signature do not prevent this.
+
+Every proof therefore goes through `verifyAuth47Proof(proof, expectedResource)`
+in `server.js`, which takes the expected resource as a **required** argument and
+throws without it. Both `/verify` and `/callback` call it; never verify a proof
+by calling `verifier.verifyProof()` directly, and never add a third entry point
+that skips it.
+
+The rule worth keeping generally: *no verification function may take only the
+thing being verified.* It must also take the expectation, so that omitting the
+binding is a missing argument rather than an invisible silence.
+
+Regression tests live in `test/auth47-resource-binding.test.mjs`:
+
+```bash
+npm test
+```
+
+They spawn a real server and relay a genuinely-signed proof at it. If the
+binding is removed, three of them fail. Reported by maxtannahill of
+[The Dojo Bay](https://dojobay.org).
 
 ### Request limits
 
@@ -989,7 +1020,7 @@ app.post('/api/paynym/lookup', async (req, res) => {
 
 ## Getting Help
 
-- **BIP47 Protocol**: [Samourai Wallet docs](https://samouraiwallet.com/)
+- **BIP47 Protocol**: [Samourai Wallet docs](https://freesamourai.com/)
 - **Paynym API**: Check `paynym-api.md` for API documentation
 - **Railway**: [Railway documentation](https://docs.railway.app/)
 - **Issues**: Create a GitHub issue for bugs or feature requests
