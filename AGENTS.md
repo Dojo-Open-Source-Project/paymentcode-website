@@ -10,10 +10,12 @@ This is a Node.js/Express web application implementing BIP47 Auth47 authenticati
 - Backend: Node.js with Express (ES modules)
 - **Node 24 or later.** `@dojo-tools/*` declares `engines: >=24`. The app does
   in fact run on Node 22 (the test suite passes there), but the floor matches
-  what the dependencies ask for. `.nvmrc` pins 24 so Nixpacks builds on it.
+  what the dependencies ask for. `.nvmrc` pins 24 so `nvm use` selects it.
 - Frontend: Vanilla HTML/CSS/JavaScript
 - Cryptography: @bitcoinerlab/secp256k1, @dojo-tools/bip47
-- Deployment: Railway (production), localhost (development)
+- Deployment: VPS under pm2, with a Tor hidden service (production); localhost
+  (development). The project used to deploy on Railway; that is gone, and
+  `railway.json` has been removed.
 
 ## Project Vision & Roadmap
 
@@ -339,7 +341,7 @@ Create a `.env` file or set environment variables:
 PORT=3000
 
 # Required for production deployment
-CALLBACK_URL=https://your-app.railway.app/callback
+CALLBACK_URL=https://paymentcode.io/callback
 
 # Environment
 NODE_ENV=development
@@ -695,27 +697,30 @@ try {
 
 ### Deployment
 
-**Railway Deployment:**
+Production is a VPS running the app under pm2, with a Tor hidden service
+alongside. There is no build step and no CI: deploying is pull, install,
+restart.
+
 ```bash
-# Install Railway CLI
-npm install -g @railway/cli
-
-# Login
-railway login
-
-# Initialize project
-railway init
-
-# Set environment variables
-railway variables set CALLBACK_URL=https://your-app.railway.app/callback
-railway variables set NODE_ENV=production
-
-# Deploy
-railway up
-
-# View logs
-railway logs
+git pull
+npm ci                     # respects package-lock.json
+pm2 restart bip47          # or: pm2 start server.js --name bip47
+pm2 logs bip47
 ```
+
+Configuration lives in a `.env` file in the repo root, loaded by `dotenv`. It is
+gitignored, so it is not managed from here.
+
+**`CALLBACK_URL` is load-bearing.** It is the resource that every Auth47 proof is
+verified against (see the resource binding section). If it does not match the
+site's real public URL, every login fails - and if it were ever set to a URL
+someone else controls, the binding would be verifying against the wrong site.
+
+**`trust proxy` is set to `1`** in server.js, meaning exactly one proxy hop is
+trusted for the client IP. Rate limiting keys on `req.ip`, so this number has to
+match the real topology: with nothing in front, `X-Forwarded-For` can be spoofed
+to bypass the limits; with two hops, every request looks like it comes from the
+same address. Revisit it if the fronting setup changes.
 
 **Environment-Specific Behavior:**
 - Development: Uses `http://localhost:3000/callback`
@@ -1034,5 +1039,4 @@ app.post('/api/paynym/lookup', async (req, res) => {
 
 - **BIP47 Protocol**: [Samourai Wallet docs](https://freesamourai.com/)
 - **Paynym API**: Check `paynym-api.md` for API documentation
-- **Railway**: [Railway documentation](https://docs.railway.app/)
 - **Issues**: Create a GitHub issue for bugs or feature requests

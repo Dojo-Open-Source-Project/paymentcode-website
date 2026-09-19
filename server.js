@@ -32,8 +32,10 @@ const MAX_QR_TEXT_LENGTH = 512;
 // Payment codes are base58; anything else must never reach an upstream URL.
 const BASE58_RE = /^[1-9A-HJ-NP-Za-km-z]{1,120}$/;
 
-// Railway terminates TLS one hop in front of us, so req.ip needs the real
-// client address for rate limiting to key on anything meaningful.
+// TLS is terminated one hop in front of us, so req.ip needs the real client
+// address for rate limiting to key on anything meaningful. This number must
+// match the real topology: with no proxy, X-Forwarded-For can be spoofed to
+// bypass the limits; with two hops, every request looks like one address.
 app.set('trust proxy', 1);
 
 // MongoDB connection
