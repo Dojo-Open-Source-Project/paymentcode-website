@@ -488,15 +488,23 @@ The project features a "SUPPORTED BY" showcase section that displays logos of BI
 
 **Main Page (index.html):**
 - Full-width section below the card grid
-- Displays 5 project logos: Samourai, Sparrow, BlueWallet, Stack, Ashigaru
+- Displays 11 project logos: Samourai, Sparrow, BlueWallet, Stack, Ashigaru,
+  Lincoin, Mynymbox, The Bitcoin Company, Dojo, The Dojo Bay, BIP47DB
 - Grayscale logos that turn colorful on hover
 - Links to external project websites
 
 **Auth Page (auth.html):**
-- Compact version inside the auth-card
-- Displays 3 Auth47-compatible wallets: Samourai, Ashigaru, Sparrow
+- Compact version inside the auth-card, split into two labelled columns
+- Clients: Samourai, Ashigaru, Sparrow
+- Servers: The Bitcoin Company, PayNym.rs, Dojo, The Dojo Bay
+- Each entry carries a `.logo-name` caption under the icon
 - Centered below the "Generate Auth QR Code" button
 - Same hover effects as main page
+
+**Adding a logo:** drop a 512x512 PNG into `public/logos/` (lowercase filename)
+and add an `<a class="logo-link">` entry. The auth page list is Auth47
+implementations specifically, so only add an entry there if the project
+actually speaks Auth47, and put it in the right column.
 
 **Styling (styles.css):**
 ```css
